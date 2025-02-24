@@ -22,15 +22,12 @@ class Drawer:
         self.plot_shape = (self.plot_height, self.plot_width, 3)
         self.plot_margin_x, self.plot_margin_y = c.PLOT_MARGINS
         self.plot_graph_width = self.plot_width - 2 * self.plot_margin_x
-        # self.plot_graph_height = (self.plot_height - 3 * self.plot_margin_y) // 2
-        # self.plot_graph_origins = [[self.plot_margin_x, self.plot_margin_y],
-        #                            [self.plot_margin_x, 2 * self.plot_margin_y + self.plot_graph_height]]
-        self.plot_graph_height = (self.plot_height - 4 * self.plot_margin_y) // 3
-        self.plot_graph_origins = [[self.plot_margin_x, self.plot_margin_y],
-                                   [self.plot_margin_x, 2 * self.plot_margin_y + self.plot_graph_height],
-                                   [self.plot_margin_x, 3 * self.plot_margin_y + 2 * self.plot_graph_height]]
+        num_plots = 3 if c.CALC_CORRELATION else 2
+        self.plot_graph_height = (self.plot_height - (num_plots + 1) * self.plot_margin_y) // num_plots
+        self.plot_graph_origins = [(self.plot_margin_x, i * self.plot_graph_height + (i + 1) * self.plot_margin_y) for i in range(num_plots)]
+        self.plot_graph_div_incs = [1.0, 0.5, 0.1] if c.CALC_CORRELATION else [1.0, 0.5]
         default_colors = matplotlib.colors.to_rgba_array([f'C{i}' for i in range(10)])
-        self.plot_graph_colors = [c.tolist() for c in (default_colors[:, :-1] * 255).round().astype(np.uint8)]
+        self.plot_graph_colors = [cc.tolist() for cc in (default_colors[:, :-1] * 255).round().astype(np.uint8)]
         self.cmap = plt.colormaps.get_cmap('plasma')
         self.original = None
         self.drawn = None
@@ -52,8 +49,7 @@ class Drawer:
     @timeit
     def draw_results(
                 self,
-                results: list[tuple[c.ModelType, c.Detections | c.Masks]],
-                rois: tuple[list[deque]] | None = None
+                results: list[tuple[c.ModelType, c.Detections | c.Masks]]
             ) -> None:
         for model_type, result in results:
             if model_type in [c.ModelType.FACE_DETECTOR, c.ModelType.FACE_LANDMARKER, c.ModelType.HAND_LANDMARKER]:
@@ -63,30 +59,30 @@ class Drawer:
                 for bbox, points, _ in result:
                     x_0, y_0, x_1, y_1 = bbox
                     self.drawn = cv2.rectangle(self.drawn, (x_0, y_0), (x_1, y_1), color, c.LINE_THICKNESS, c.LINE_TYPE)
-                    # for k, (x_p, y_p) in enumerate(points):
                     for x_p, y_p in points:
                         self.drawn = cv2.circle(self.drawn, (x_p, y_p), c.POINT_RADIUS, color, c.LINE_THICKNESS, c.LINE_TYPE)
-                        # self.drawn = cv2.putText(self.drawn, str(k), (x_p, y_p), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1.0, ROI_COLOR, LINE_THICKNESS, c.LINE_TYPE)
             elif model_type == c.ModelType.PERSON_SEGMENTER:
                 class_mask, conf_masks = result
                 if class_mask.size == 0:
                     continue
-                # mask = np.zeros_like(class_mask)
-                # mask[class_mask == 3] = 255
-                # self.drawn = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
                 face_conf_mask = (conf_masks[3] * 255).round().astype(np.uint8)
                 self.drawn = cv2.cvtColor(face_conf_mask, cv2.COLOR_GRAY2BGR)
             else:
                 raise NotImplementedError
-        if rois is not None:
-            roi_centers, roi_bboxes = rois
-            roi_centers = [r[-1] for r in roi_centers]
-            roi_bboxes = [r[-1] for r in roi_bboxes]
-            for (x_f, y_f), (x_0, y_0, x_1, y_1), color in zip(roi_centers, roi_bboxes, self.plot_graph_colors):
-                if np.isnan([x_f, y_f, x_0, x_1, y_0, y_1]).any():
-                    continue
-                self.drawn = cv2.rectangle(self.drawn, (x_0, y_0), (x_1, y_1), color, c.LINE_THICKNESS, c.LINE_TYPE)
-                self.drawn = cv2.drawMarker(self.drawn, (int(x_f), int(y_f)), color, cv2.MARKER_CROSS, c.LINE_THICKNESS*5, c.LINE_THICKNESS, c.LINE_TYPE)
+
+    @timeit
+    def draw_rois(
+                self,
+                roi_centers: list[deque],
+                roi_bboxes: list[deque]
+            ) -> None:
+        roi_centers = [c for c in roi_centers]
+        roi_bboxes = [b for b in roi_bboxes]
+        for (x_f, y_f), (x_0, y_0, x_1, y_1), color in zip(roi_centers, roi_bboxes, self.plot_graph_colors):
+            if np.isnan([x_f, y_f, x_0, x_1, y_0, y_1]).any():
+                continue
+            self.drawn = cv2.rectangle(self.drawn, (x_0, y_0), (x_1, y_1), color, c.LINE_THICKNESS, c.LINE_TYPE)
+            self.drawn = cv2.drawMarker(self.drawn, (int(x_f), int(y_f)), color, cv2.MARKER_CROSS, c.LINE_THICKNESS*5, c.LINE_THICKNESS, c.LINE_TYPE)
 
     @timeit
     def draw_heatmap(
@@ -112,32 +108,23 @@ class Drawer:
 
     def write_info(
                 self,
-                auto_exposure: bool,
+                auto_adjust: bool,
                 sampling_rate: float,
                 peak_freqs: list[float],
                 peak_lags: list[float]
             ) -> None:
-        # if auto_exposure:
-        #     self.drawn = cv2.putText(self.drawn, 'adjusting exposure', (15, 30), cv2.FONT_HERSHEY_COMPLEX, font_size, (0, 128, 255), c.LINE_THICKNESS, c.LINE_TYPE)
-        # self.drawn = cv2.putText(self.drawn, f'sample rate: {sampling_rate:.2f} Hz', (15, 60), cv2.FONT_HERSHEY_COMPLEX, font_size, (0, 128, 255), c.LINE_THICKNESS, c.LINE_TYPE)
-        # for s, peak_freq in enumerate(peak_freqs):
-        #     peak_freq_text = f'peak_freq_{s}: {int(peak_freq[-1] * 60)} bpm' if not np.isnan(peak_freq[-1]) else 'NaN'
-        #     self.drawn = cv2.putText(self.drawn, peak_freq_text, (15, 30 * (s + 3)), cv2.FONT_HERSHEY_COMPLEX, font_size, (128, 0, 255), c.LINE_THICKNESS, c.LINE_TYPE)
-        # for s, peak_freq in enumerate(peak_freqs):
-        #     peak_freq_text = f'peak_freq_{s}: {int(peak_freq[-1] * 60)} bpm' if not np.isnan(peak_freq[-1]) else 'NaN'
-        #     self.drawn = cv2.putText(self.drawn, peak_freq_text, (15, 30 * (s + 3)), cv2.FONT_HERSHEY_COMPLEX, font_size, (128, 0, 255), c.LINE_THICKNESS, c.LINE_TYPE)
         self.curr_text_index = 0
         self.write_text(f'sample rate: {sampling_rate:.2f} Hz', (255, 0, 0))
         self.curr_text_index += 1
         for s, peak_freq in enumerate(peak_freqs):
-            peak_freq_text = f'peak_freq_{s}: {int(peak_freq[-1] * 60)} bpm' if not np.isnan(peak_freq[-1]) else 'NaN'
+            peak_freq_text = f'peak_freq_{s}: {int(peak_freq * 60)} bpm' if not np.isnan(peak_freq) else 'NaN'
             self.write_text(peak_freq_text, (0, 0, 255))
         self.curr_text_index += 1
         for s, peak_lag in enumerate(peak_lags):
-            peak_lag_text = f'peak_lag_{s}: {int(peak_lag[-1] * 1000)} ms' if not np.isnan(peak_lag[-1]) else 'NaN'
+            peak_lag_text = f'peak_lag_{s}: {int(peak_lag * 1000)} ms' if not np.isnan(peak_lag) else 'NaN'
             self.write_text(peak_lag_text, (0, 255, 0))
-        if auto_exposure:
-            self.write_text('adjusting exposure', (0, 0, 255))
+        if auto_adjust:
+            self.write_text('adjusting exposure & focus', (0, 0, 255))
 
     def _draw_signal(
                 self,
@@ -170,31 +157,32 @@ class Drawer:
                 correlations
             ) -> None:
 
-        range_scale = 1.2
+        range_scale = 1.0
         timestamps, signals = np.array(time_signals).transpose([1, 0, 2])
-        timestamps_range = np.nanmin(timestamps), np.nanmax(timestamps)
-        signal_range = range_scale * np.nanmin(signals), range_scale * np.nanmax(signals)
-        frequencies, magnitudes = np.array(freq_signals).transpose([1, 0, 2])
+        timestamps_range = (np.nanmin(timestamps), np.nanmax(timestamps))
+        signal_range = (range_scale * np.nanmin(signals), range_scale * np.nanmax(signals))
+
+        # frequencies, magnitudes = np.array(freq_signals).transpose([1, 0, 2])
         # frequency_range = (np.nanmin(frequencies), np.nanmax(frequencies)) if frequencies.size > 0 else (0.0, 1.0)
-        frequency_range = (c.FFT_MIN_FREQUENCY, c.FFT_MAX_FREQUENCY)
-        magnitude_range = (0.0, range_scale * np.nanmax(magnitudes)) if magnitudes.size > 0 else (0.0, 1.0)
+        # magnitude_range = (0.0, range_scale * np.nanmax(magnitudes)) if magnitudes.size > 0 else (0.0, 1.0)
+        frequency_range = (c.SIGNAL_MIN_FREQUENCY, c.SIGNAL_MAX_FREQUENCY)
+        magnitude_range = (0.0, 1.0)
 
-        # timestamps_range = np.nanmin([t for t, _ in time_signals]), np.nanmax([t for t, _ in time_signals])
-        # signal_range = range_scale * np.nanmin([s for _, s in time_signals]), range_scale * np.nanmax([s for _, s in time_signals])
-        # frequency_range = np.nanmin([f for f, _ in freq_signals]), np.nanmax([f for f, _ in freq_signals])
-        # magnitude_range = 0.0, range_scale * np.nanmax([m for _, m in freq_signals])
+        # lags, corrs = np.array(correlations).transpose([1, 0, 2])
+        # lags_range = (np.nanmin(lags), np.nanmax(lags)) if corrs.size > 0 else (0.0, 1.0)
+        # corrs_range = (range_scale * np.nanmin(corrs), range_scale * np.nanmax(corrs)) if corrs.size > 0 else (0.0, 1.0)
+        lags_range = (c.CORR_MIN_LAG, c.CORR_MAX_LAG)
+        corrs_range = (-1.0, 1.0)
 
-        lags, corrs = np.array(correlations).transpose([1, 0, 2])
-        # lags_range = np.nanmin(lags), np.nanmax(lags)
-        lags_range = -1, 1
-        corrs_range = range_scale * np.nanmin(corrs), range_scale * np.nanmax(corrs)
-
-        # signal_groups = [time_signals, freq_signals]
-        signal_groups = [time_signals, freq_signals, correlations]
-        group_ranges = [(timestamps_range, signal_range), (frequency_range, magnitude_range), (lags_range, corrs_range)]
+        if c.CALC_CORRELATION:
+            signal_groups = [time_signals, freq_signals, correlations]
+            group_ranges = [(timestamps_range, signal_range), (frequency_range, magnitude_range), (lags_range, corrs_range)]
+        else:
+            signal_groups = [time_signals, freq_signals]
+            group_ranges = [(timestamps_range, signal_range), (frequency_range, magnitude_range)]
 
         self.plot = np.ones(self.plot_shape, dtype=np.uint8) * 255
-        gen = zip(signal_groups, group_ranges, self.plot_graph_origins, [1.0, 0.5, 25.0])
+        gen = zip(signal_groups, group_ranges, self.plot_graph_origins, self.plot_graph_div_incs)
         for signal_group, (group_range_x, group_range_y), (graph_origin_x, graph_origin_y), div_inc in gen:
 
             corner_0 = (graph_origin_x, graph_origin_y)
@@ -203,6 +191,17 @@ class Drawer:
 
             min_x, max_x = group_range_x
             min_y, max_y = group_range_y
+
+            if not np.isnan(min_x) and not np.isnan(max_x):
+                for x in np.arange(np.ceil(min_x / div_inc) * div_inc, np.ceil(max_x / div_inc) * div_inc, div_inc):
+                    div_x_n = np.nan_to_num((x - min_x) / (max_x - min_x), nan=0.0, neginf=0.0, posinf=1.0)
+                    div_x_p = int(div_x_n * self.plot_graph_width + graph_origin_x)
+                    div_point_0 = (div_x_p, graph_origin_y)
+                    div_point_1 = (div_x_p, graph_origin_y + self.plot_graph_height)
+                    self.plot = cv2.line(self.plot, div_point_0, div_point_1, (224, 224, 224), lineType=c.LINE_TYPE)
+                    (tw, th), _ = cv2.getTextSize(f'{min_x: .2f}', cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, 1)
+                    num_point = (div_x_p - tw // 2, graph_origin_y + self.plot_graph_height + th)
+                    self.plot = cv2.putText(self.plot, f'{min_x: .2f}', num_point, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, (160, 160, 160), lineType=c.LINE_TYPE)
 
             if min_x <= 0.0 <= max_x:
                 axis_x_n = np.nan_to_num(max_x / (max_x - min_x), nan=0.0, neginf=0.0, posinf=1.0)
@@ -217,14 +216,6 @@ class Drawer:
                 axis_point_0 = (graph_origin_x, axis_y_p)
                 axis_point_1 = (graph_origin_x + self.plot_graph_width, axis_y_p)
                 self.plot = cv2.line(self.plot, axis_point_0, axis_point_1, (0, 0, 0), lineType=c.LINE_TYPE)
-
-            if not np.isnan(min_x) and not np.isnan(max_x):
-                for x in np.arange(np.ceil(min_x), np.ceil(max_x), div_inc):
-                    div_x_n = np.nan_to_num((x - min_x) / (max_x - min_x), nan=0.0, neginf=0.0, posinf=1.0)
-                    div_x_p = int(div_x_n * self.plot_graph_width + graph_origin_x)
-                    div_point_0 = (div_x_p, graph_origin_y)
-                    div_point_1 = (div_x_p, graph_origin_y + self.plot_graph_height)
-                    self.plot = cv2.line(self.plot, div_point_0, div_point_1, (224, 224, 224), lineType=c.LINE_TYPE)
 
             pos_min_x = (graph_origin_x - 5, graph_origin_y + self.plot_graph_height + 15)
             pos_max_x = (graph_origin_x + self.plot_graph_width - 25, graph_origin_y + self.plot_graph_height + 15)

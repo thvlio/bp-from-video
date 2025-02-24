@@ -17,18 +17,21 @@ class VideoReader:
         self.path = path
         self.target_res = target_res
         self.cap = cv2.VideoCapture(path)
+        self.cap.read()
         if isinstance(self.path, int):
+            # self.cap.set(cv2.CAP_PROP_AUTO_WB, 1)
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
-            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-            self.cap.set(cv2.CAP_PROP_FOCUS, c.OPTIMAL_FOCUS)
+            # self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+            # self.cap.set(cv2.CAP_PROP_FOCUS, c.OPTIMAL_FOCUS)
+            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter.fourcc(*'MJPG'))
             if self.target_res is not None:
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.target_res[0])
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.target_res[1])
-            self.auto_exposure = True
+            self.auto_adjust = True
         else:
             self.cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
-            self.auto_exposure = False
+            self.auto_adjust = False
         self.timestamp_ref = time.time()
 
     @timeit
@@ -40,7 +43,6 @@ class VideoReader:
         if isinstance(self.path, int):
             timestamp = time.time() - self.timestamp_ref
         else:
-            # timestamp = self.cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
             timestamp = self.cap.get(cv2.CAP_PROP_POS_FRAMES) / self.cap.get(cv2.CAP_PROP_FPS)
         read, frame = self.cap.read()
         if read:
@@ -53,7 +55,10 @@ class VideoReader:
                 frame = frame[:, left:right, :]
             if flip_horizontally:
                 frame = cv2.flip(frame, 1)
-        if timestamp >= c.EXPOSURE_ADJUSTMENT_TIME and self.auto_exposure:
+        if timestamp >= c.EXPOSURE_ADJUSTMENT_TIME and self.auto_adjust:
+            # self.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
             self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-            self.auto_exposure = False
+            self.cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+            # self.cap.set(cv2.CAP_PROP_FOCUS, c.OPTIMAL_FOCUS)
+            self.auto_adjust = False
         return read, frame, timestamp

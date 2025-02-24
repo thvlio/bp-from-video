@@ -1,6 +1,3 @@
-import os
-import time
-
 import cv2
 import numpy as np
 
@@ -11,56 +8,6 @@ from signal_processor import SignalProcessor
 from video_reader import VideoReader
 
 from custom_profiler import printit
-
-
-# TODO: resample signals
-#   possibly fill signals with zero
-#       or with signal mean
-#       or with weighted average (weigth going from 1 to 0 from start to end)
-#   resample the signal to get uniform sampling rate
-
-# TODO: evaluate filter design
-#   reasonable frequencies are 0.8 hz to 2 hz
-#       consider giving the filter a little more room
-#   check num taps around
-#   check padlen around
-
-# TODO: find best spots in the face
-#   check the heatmap implementation
-#       filtered signal needs to be checked
-#       variations idea should be checked
-#       check if hotspots can seen or not
-#   search for most vascularized spots on the face
-
-# TODO: segment the skin
-#   can be useful if rois are outside the face a litte
-#   look for mediapipe image segmentation guide
-
-# TODO: properties
-#   CAP_PROP_WB_TEMPE
-#   CAP_PROP_TEMPERATURE
-#   CAP_PROP_BRIGHTNESS
-#   CAP_PROP_CONTRAST
-#   CAP_PROP_SATURATION
-#   CAP_PROP_HUE
-#   CAP_PROP_GAIN
-
-# TODO: filters
-#   spatial and temporal
-
-# TODO: check papers
-#   see differences
-#   implement any signal processing missing
-
-# TODO: what
-#   try ppg = (g/ug) / (r/ur) - 1
-#   uc is calculated over time interval
-
-# TODO: hmm
-#   try and make the image zero mean and 1 std
-
-# TODO: color space
-#   g / 2 - b / 4 - r / 4 + 1 / 2
 
 
 def main():
@@ -83,8 +30,6 @@ def main():
 
     cv2.namedWindow('frame')
 
-    video_reader.cap.set(cv2.CAP_PROP_AUTO_WB, 0)
-
     props = [
         (cv2.CAP_PROP_FOCUS, 5, 'cv2.CAP_PROP_FOCUS'), # 50 [0, 250]
         (cv2.CAP_PROP_WB_TEMPERATURE, 100, 'cv2.CAP_PROP_WB_TEMPERATURE'), # 4783 [2000, 6500]
@@ -105,29 +50,37 @@ def main():
             break
 
         timestamp_ms = int(timestamp * 1000)
-        face_detections, face_landmarks, hand_landmarks, person_masks = inference_runner.run_pipe(frame, timestamp_ms)
+        inference_results = inference_runner.run_pipe(frame, timestamp_ms)
 
-        single_face_landmarks = face_landmarks[1][0] if face_landmarks[1] != [] else None
-        single_hand_landmarks = hand_landmarks[1][0] if hand_landmarks[1] != [] else None
-        # landmarks_collection = [single_face_landmarks, single_face_landmarks]
-        landmarks_collection = [single_face_landmarks, single_hand_landmarks]
-        # time_signals, freq_signals, peak_freqs_filtered = signal_processor.update_signals(frame, timestamp, landmarks_collection, person_masks)
-        time_signals, freq_signals, peak_freqs_filtered, correlations, peak_lags_filtered = signal_processor.update_signals(frame, timestamp, landmarks_collection)
+        # face_detector_results, face_landmarker_results, hand_landmarker_results, person_segmenter_results = inference_results
+        _, (_, face_landmarks), (_, hand_landmarks), _ = inference_results
+
+        if c.CORRELATION_PAIR == c.CorrelationPair.FACE_FACE:
+            largest_face_landmarks = face_landmarks[np.argmax([h * w for _, _, (h, w) in face_landmarks])] if face_landmarks != [] else None
+            landmarks_collection = [largest_face_landmarks, largest_face_landmarks]
+        elif c.CORRELATION_PAIR == c.CorrelationPair.FACE_HAND:
+            largest_face_landmarks = face_landmarks[np.argmax([h * w for _, _, (h, w) in face_landmarks])] if face_landmarks != [] else None
+            largest_hand_landmarks = hand_landmarks[np.argmax([h * w for _, _, (h, w) in hand_landmarks])] if hand_landmarks != [] else None
+            landmarks_collection = [largest_face_landmarks, largest_hand_landmarks]
+        else:
+            raise NotImplementedError
+
+        time_signals, freq_signals, peak_freqs_filtered, mean_roi_positions, roi_bboxes, correlations, peak_lags_filtered = \
+            signal_processor.update_signals(frame, timestamp, landmarks_collection)
 
         drawer.draw_signals(time_signals, freq_signals, correlations)
 
         drawer.set_frame(frame)
 
         sampling_rate = 1 / (timestamp - timestamp_prev)
-        drawer.write_info(video_reader.auto_exposure, sampling_rate, peak_freqs_filtered, peak_lags_filtered)
+        drawer.write_info(video_reader.auto_adjust, sampling_rate, peak_freqs_filtered, peak_lags_filtered)
 
-        results = [face_detections, face_landmarks, hand_landmarks, person_masks]
-        rois = [signal_processor.roi_filtered, signal_processor.roi_bboxes]
-        drawer.draw_results(results, rois)
+        drawer.draw_results(inference_results)
+        drawer.draw_rois(mean_roi_positions, roi_bboxes)
 
-        # if single_face_landmarks is not None:
-        #     variations = signal_processor.update_heatmap(frame, single_face_landmarks[1])
-        #     drawer.draw_heatmap(single_face_landmarks[1], variations)
+        if c.CALC_HEATMAP and largest_face_landmarks is not None:
+            variations = signal_processor.update_heatmap(frame, largest_face_landmarks[1]) # pylint: disable=E1136
+            drawer.draw_heatmap(largest_face_landmarks[1], variations) # pylint: disable=E1136
 
         cv2.moveWindow('frame', 1080 + 1920 // 2 - frame.shape[1] // 2, 0)
         cv2.imshow('frame', drawer.get_frame())
@@ -150,6 +103,8 @@ def main():
         elif key == ord('6'):
             p = (p + 1) % len(props)
             print(f'{prop_name}: {video_reader.cap.get(prop_id)}')
+        elif key == ord('0'):
+            video_reader.cap.set(cv2.CAP_PROP_FOCUS, c.OPTIMAL_FOCUS)
 
         timestamp_prev = timestamp
 

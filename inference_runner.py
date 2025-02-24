@@ -22,23 +22,19 @@ class InferenceRunner:
                 person_segmenter_path: str | None = 'models/selfie_multiclass.tflite',
                 running_mode: VisionTaskRunningMode = c.RUNNING_MODE
             ) -> None:
-        self.face_detector_path = face_detector_path
-        self.face_landmarker_path = face_landmarker_path
-        self.hand_landmarker_path = hand_landmarker_path
-        self.person_segmenter_path = person_segmenter_path
         self.running_mode = running_mode
-        if c.FACE_DETECTION_ENABLED:
-            self.face_detector_options = FaceDetectorOptions(BaseOptions(self.face_detector_path), self.running_mode)
-            self.face_detector = FaceDetector.create_from_options(self.face_detector_options)
-        if c.FACE_LANDMARKS_ENABLED:
-            self.face_landmarker_options = FaceLandmarkerOptions(BaseOptions(self.face_landmarker_path), self.running_mode)
-            self.face_landmarker = FaceLandmarker.create_from_options(self.face_landmarker_options)
-        if c.HAND_LANDMARKS_ENABLED:
-            self.hand_landmarker_options = HandLandmarkerOptions(BaseOptions(self.hand_landmarker_path), self.running_mode)
-            self.hand_landmarker = HandLandmarker.create_from_options(self.hand_landmarker_options)
-        if c.PERSON_SEGMENTATION_ENABLED:
-            self.person_segmenter_options = ImageSegmenterOptions(BaseOptions(self.person_segmenter_path), self.running_mode, True, True)
-            self.person_segmenter = ImageSegmenter.create_from_options(self.person_segmenter_options)
+        if c.FACE_DETECTION_ENABLED and face_detector_path is not None:
+            face_detector_options = FaceDetectorOptions(BaseOptions(face_detector_path), self.running_mode)
+            self.face_detector = FaceDetector.create_from_options(face_detector_options)
+        if c.FACE_LANDMARKS_ENABLED and face_landmarker_path is not None:
+            face_landmarker_options = FaceLandmarkerOptions(BaseOptions(face_landmarker_path), self.running_mode)
+            self.face_landmarker = FaceLandmarker.create_from_options(face_landmarker_options)
+        if c.HAND_LANDMARKS_ENABLED and hand_landmarker_path is not None:
+            hand_landmarker_options = HandLandmarkerOptions(BaseOptions(hand_landmarker_path), self.running_mode)
+            self.hand_landmarker = HandLandmarker.create_from_options(hand_landmarker_options)
+        if c.PERSON_SEGMENTATION_ENABLED and person_segmenter_path is not None:
+            person_segmenter_options = ImageSegmenterOptions(BaseOptions(person_segmenter_path), self.running_mode, True, True)
+            self.person_segmenter = ImageSegmenter.create_from_options(person_segmenter_options)
 
     @timeit
     def run_face_detector(
@@ -140,10 +136,11 @@ class InferenceRunner:
                 self,
                 frame: cv2.typing.MatLike,
                 timestamp_ms: int | None = None
-            ) -> list[tuple[c.ModelType, c.Detections | c.Masks]]:
+            # ) -> tuple[tuple[c.ModelType, c.Detections | c.Masks]]:
+            ) -> tuple[tuple[c.ModelType, c.Detections], tuple[c.ModelType, c.Detections], tuple[c.ModelType, c.Detections], tuple[c.ModelType, c.Masks]]:
         frame_mp = Image(image_format=ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        face_detections = self.run_face_detector(frame_mp, timestamp_ms)
-        face_landmarks = self.run_face_landmarker(frame_mp, timestamp_ms)
-        hand_landmarks = self.run_hand_landmarker(frame_mp, timestamp_ms)
-        person_masks = self.run_person_segmenter(frame_mp, timestamp_ms)
-        return face_detections, face_landmarks, hand_landmarks, person_masks
+        face_detector_results = self.run_face_detector(frame_mp, timestamp_ms)
+        face_landmarker_results = self.run_face_landmarker(frame_mp, timestamp_ms)
+        hand_landmarker_results = self.run_hand_landmarker(frame_mp, timestamp_ms)
+        person_segmenter_results = self.run_person_segmenter(frame_mp, timestamp_ms)
+        return face_detector_results, face_landmarker_results, hand_landmarker_results, person_segmenter_results
