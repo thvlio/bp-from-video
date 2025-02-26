@@ -8,7 +8,7 @@ from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarker, FaceLa
 from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarker, HandLandmarkerOptions
 from mediapipe.tasks.python.vision.image_segmenter import ImageSegmenter, ImageSegmenterOptions
 
-import config as c
+from config import Config as c
 from custom_profiler import timeit
 
 
@@ -37,10 +37,11 @@ class InferenceRunner:
             self.person_segmenter = ImageSegmenter.create_from_options(person_segmenter_options)
 
     @timeit
-    def run_face_detector(
+    def _run_face_detector(
                 self,
                 frame_mp: Image,
-                timestamp_ms: int | None = None
+                timestamp_ms: int | None = None,
+                sort_largest: bool = True
             ) -> tuple[c.ModelType, c.Detections]:
         face_detections = []
         if c.FACE_DETECTION_ENABLED:
@@ -50,24 +51,25 @@ class InferenceRunner:
                 face_detection_results = self.face_detector.detect_for_video(frame_mp, timestamp_ms)
             else:
                 raise NotImplementedError
-            if face_detection_results != []:
-                for detection in face_detection_results.detections:
-                    bbox = [detection.bounding_box.origin_x,
-                            detection.bounding_box.origin_y,
-                            detection.bounding_box.origin_x + detection.bounding_box.width,
-                            detection.bounding_box.origin_y + detection.bounding_box.height]
-                    x = np.clip(np.array([kpt.x for kpt in detection.keypoints]) * frame_mp.width, 0, frame_mp.width - 1).astype(int)
-                    y = np.clip(np.array([kpt.y for kpt in detection.keypoints]) * frame_mp.height, 0, frame_mp.height - 1).astype(int)
-                    points = np.vstack((x, y)).T
-                    shape = (detection.bounding_box.height, detection.bounding_box.width)
-                    face_detections.append((bbox, points, shape))
+            for detection in face_detection_results.detections:
+                bbox = (detection.bounding_box.origin_x,
+                        detection.bounding_box.origin_y,
+                        detection.bounding_box.origin_x + detection.bounding_box.width,
+                        detection.bounding_box.origin_y + detection.bounding_box.height)
+                x = np.clip(np.array([kpt.x for kpt in detection.keypoints]) * frame_mp.width, 0, frame_mp.width - 1).astype(int)
+                y = np.clip(np.array([kpt.y for kpt in detection.keypoints]) * frame_mp.height, 0, frame_mp.height - 1).astype(int)
+                points = np.vstack((x, y)).T
+                face_detections.append((bbox, points))
+            if sort_largest:
+                face_detections = sorted(face_detections, key=lambda e: (e[0][2] - e[0][0]) * (e[0][3] - e[0][1]), reverse=True)
         return c.ModelType.FACE_DETECTOR, face_detections
 
     @timeit
-    def run_face_landmarker(
+    def _run_face_landmarker(
                 self,
                 frame_mp: Image,
-                timestamp_ms: int | None = None
+                timestamp_ms: int | None = None,
+                sort_largest: bool = True
             ) -> tuple[c.ModelType, c.Detections]:
         face_landmarks = []
         if c.FACE_LANDMARKS_ENABLED:
@@ -77,21 +79,22 @@ class InferenceRunner:
                 face_landmarker_results = self.face_landmarker.detect_for_video(frame_mp, timestamp_ms)
             else:
                 raise NotImplementedError
-            if face_landmarker_results != []:
-                for landmarks in face_landmarker_results.face_landmarks:
-                    x = np.clip(np.array([lm.x for lm in landmarks]) * frame_mp.width, 0, frame_mp.width - 1).astype(int)
-                    y = np.clip(np.array([lm.y for lm in landmarks]) * frame_mp.height, 0, frame_mp.height - 1).astype(int)
-                    points = np.vstack((x, y)).T
-                    bbox = [min(x), min(y), max(x), max(y)]
-                    shape = (bbox[3]-bbox[1], bbox[2]-bbox[0])
-                    face_landmarks.append((bbox, points, shape))
+            for landmarks in face_landmarker_results.face_landmarks:
+                x = np.clip(np.array([lm.x for lm in landmarks]) * frame_mp.width, 0, frame_mp.width - 1).astype(int)
+                y = np.clip(np.array([lm.y for lm in landmarks]) * frame_mp.height, 0, frame_mp.height - 1).astype(int)
+                bbox = [min(x), min(y), max(x), max(y)]
+                points = np.vstack((x, y)).T
+                face_landmarks.append((bbox, points))
+            if sort_largest:
+                face_landmarks = sorted(face_landmarks, key=lambda e: (e[0][2] - e[0][0]) * (e[0][3] - e[0][1]), reverse=True)
         return c.ModelType.FACE_LANDMARKER, face_landmarks
 
     @timeit
-    def run_hand_landmarker(
+    def _run_hand_landmarker(
                 self,
                 frame_mp: Image,
-                timestamp_ms: int | None = None
+                timestamp_ms: int | None = None,
+                sort_largest: bool = True
             ) -> tuple[c.ModelType, c.Detections]:
         hand_landmarks = []
         if c.HAND_LANDMARKS_ENABLED:
@@ -101,18 +104,18 @@ class InferenceRunner:
                 hand_landmarker_results = self.hand_landmarker.detect_for_video(frame_mp, timestamp_ms)
             else:
                 raise NotImplementedError
-            if hand_landmarker_results != []:
-                for landmarks in hand_landmarker_results.hand_landmarks:
-                    x = np.clip(np.array([lm.x for lm in landmarks]) * frame_mp.width, 0, frame_mp.width - 1).astype(int)
-                    y = np.clip(np.array([lm.y for lm in landmarks]) * frame_mp.height, 0, frame_mp.height - 1).astype(int)
-                    points = np.vstack((x, y)).T
-                    bbox = [min(x), min(y), max(x), max(y)]
-                    shape = (bbox[3]-bbox[1], bbox[2]-bbox[0])
-                    hand_landmarks.append((bbox, points, shape))
+            for landmarks in hand_landmarker_results.hand_landmarks:
+                x = np.clip(np.array([lm.x for lm in landmarks]) * frame_mp.width, 0, frame_mp.width - 1).astype(int)
+                y = np.clip(np.array([lm.y for lm in landmarks]) * frame_mp.height, 0, frame_mp.height - 1).astype(int)
+                points = np.vstack((x, y)).T
+                bbox = [min(x), min(y), max(x), max(y)]
+                hand_landmarks.append((bbox, points))
+            if sort_largest:
+                hand_landmarks = sorted(hand_landmarks, key=lambda e: (e[0][2] - e[0][0]) * (e[0][3] - e[0][1]), reverse=True)
         return c.ModelType.HAND_LANDMARKER, hand_landmarks
 
     @timeit
-    def run_person_segmenter(
+    def _run_person_segmenter(
                 self,
                 frame_mp: Image,
                 timestamp_ms: int | None = None
@@ -126,21 +129,20 @@ class InferenceRunner:
                 person_segmenter_results = self.person_segmenter.segment_for_video(frame_mp, timestamp_ms)
             else:
                 raise NotImplementedError
-            if person_segmenter_results != []:
-                class_mask = person_segmenter_results.category_mask.numpy_view()
-                conf_masks = [conf_mask.numpy_view() for conf_mask in person_segmenter_results.confidence_masks]
+            class_mask = person_segmenter_results.category_mask.numpy_view()
+            conf_masks = [conf_mask.numpy_view() for conf_mask in person_segmenter_results.confidence_masks]
         return c.ModelType.PERSON_SEGMENTER, (class_mask, conf_masks)
 
     @timeit
     def run_pipe(
                 self,
                 frame: cv2.typing.MatLike,
-                timestamp_ms: int | None = None
-            # ) -> tuple[tuple[c.ModelType, c.Detections | c.Masks]]:
-            ) -> tuple[tuple[c.ModelType, c.Detections], tuple[c.ModelType, c.Detections], tuple[c.ModelType, c.Detections], tuple[c.ModelType, c.Masks]]:
+                timestamp_ms: int | None = None,
+                sort_largest: bool = True,
+            ) -> list[tuple[c.ModelType, c.Detections | c.Masks]]:
         frame_mp = Image(image_format=ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        face_detector_results = self.run_face_detector(frame_mp, timestamp_ms)
-        face_landmarker_results = self.run_face_landmarker(frame_mp, timestamp_ms)
-        hand_landmarker_results = self.run_hand_landmarker(frame_mp, timestamp_ms)
-        person_segmenter_results = self.run_person_segmenter(frame_mp, timestamp_ms)
+        face_detector_results = self._run_face_detector(frame_mp, timestamp_ms, sort_largest)
+        face_landmarker_results = self._run_face_landmarker(frame_mp, timestamp_ms, sort_largest)
+        hand_landmarker_results = self._run_hand_landmarker(frame_mp, timestamp_ms, sort_largest)
+        person_segmenter_results = self._run_person_segmenter(frame_mp, timestamp_ms)
         return face_detector_results, face_landmarker_results, hand_landmarker_results, person_segmenter_results

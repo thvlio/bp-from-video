@@ -10,100 +10,89 @@ import scipy.interpolate
 import scipy.signal
 import scipy.stats
 
-import config as c
+from config import Config as c
 from custom_profiler import timeit
 
 
 class SignalProcessor:
 
     @staticmethod
-    def create_deques(
+    def _create_deques(
                 num_deques: int = 1,
                 max_length: int | None = None,
                 filled: bool = True,
                 fill_value: Any = np.nan
-            ) -> list[deque]:
+            ) -> list[deque[Any]]:
         values = [fill_value] * max_length if filled else []
         return [deque(values, max_length) for _ in range(num_deques)]
 
     def __init__(
                 self,
             ) -> None:
-        self.num_signals = len(c.ROI_LANDMARK_INDICES)
-        self.timestamps, = self.create_deques(1, c.SIGNAL_MAX_SAMPLES)
-        self.signals_raw = self.create_deques(self.num_signals, c.SIGNAL_MAX_SAMPLES)
-        self.signals_proc = self.create_deques(self.num_signals, c.SIGNAL_MAX_SAMPLES)
-        self.roi_positions = self.create_deques(self.num_signals, c.ROI_POS_MAX_SAMPLES, fill_value=(np.nan, np.nan))
-        self.roi_bboxes = self.create_deques(self.num_signals, c.ROI_POS_MAX_SAMPLES, fill_value=(np.nan, np.nan, np.nan, np.nan))
-        self.landmark_variations = self.create_deques(c.HEATMAP_POINTS, c.SIGNAL_MAX_SAMPLES)
+        self.num_signals = len(c.SIGNAL_LOCATION_CONFIGS)
+        self.timestamps, = self._create_deques(1, c.SIGNAL_MAX_SAMPLES)
+        self.signals_raw = self._create_deques(self.num_signals, c.SIGNAL_MAX_SAMPLES)
+        self.signals_proc = self._create_deques(self.num_signals, c.SIGNAL_MAX_SAMPLES)
+        self.signal_pois = self._create_deques(self.num_signals, c.ROI_POS_MAX_SAMPLES, fill_value=(np.nan, np.nan))
+        self.signal_rois = self._create_deques(self.num_signals, c.ROI_POS_MAX_SAMPLES, fill_value=(np.nan, np.nan, np.nan, np.nan))
         self.frequencies = [[]] * self.num_signals
         self.magnitudes = [[]] * self.num_signals
-        self.peak_freqs = self.create_deques(self.num_signals, c.SIGNAL_MAX_SAMPLES)
-        self.peak_lags = self.create_deques(math.comb(self.num_signals, 2), c.SIGNAL_MAX_SAMPLES)
-        self.sos = scipy.signal.butter(c.BUTTER_ORDER, [c.SIGNAL_MIN_FREQUENCY, c.SIGNAL_MAX_FREQUENCY], btype='bandpass', output='sos', fs=c.BUTTER_FS)
+        self.peak_freqs = self._create_deques(self.num_signals, c.SIGNAL_MAX_SAMPLES)
+        self.peak_lags = self._create_deques(math.comb(self.num_signals, 2), c.SIGNAL_MAX_SAMPLES)
+        if c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.BUTTER:
+            bands = [c.SIGNAL_MIN_FREQUENCY, c.SIGNAL_MAX_FREQUENCY]
+            self.butter = scipy.signal.butter(c.BUTTER_ORDER, bands, btype='bandpass', output='sos', fs=c.BUTTER_FS)
+        elif c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.FIR:
+            bands = [0, c.SIGNAL_MIN_FREQUENCY - c.FIR_DF, c.SIGNAL_MIN_FREQUENCY, c.SIGNAL_MAX_FREQUENCY, c.SIGNAL_MAX_FREQUENCY + c.FIR_DF, c.FIR_FS / 2]
+            self.fir = scipy.signal.firls(c.FIR_TAPS, bands, [0, 0, 1, 1, 0, 0], fs=c.FIR_FS)
 
-    @timeit
-    def update_heatmap(
-                self,
-                frame: cv2.typing.MatLike,
-                points: np.ndarray
-            ) -> list[float]:
-        variations = []
-        for k, (x_p, y_p) in enumerate(points):
-            padding = 10
-            surrounding = frame[y_p-padding:y_p+padding, x_p-padding:x_p+padding, 1]
-            value = np.mean(surrounding)
-            self.landmark_variations[k].append(value)
-            variation = scipy.stats.variation(self.landmark_variations[k])
-            variations.append(variation)
-        return variations
+    # TODO: get dft and pgram on the same function
 
-    @timeit
-    def detrend_signal(
-                self,
-                signal: deque,
-                method: str
-            ) -> deque:
-        signal_notnan = np.array(signal)[~np.isnan(signal)]
-        if signal_notnan.size == 0:
-            signal_notnan = [0]
-        signal_detrended_notnan = scipy.signal.detrend(signal_notnan, type=method)
-        signal_detrended = np.array([np.nan] * len(signal))
-        signal_detrended[~np.isnan(signal)] = signal_detrended_notnan
-        return deque(signal_detrended, maxlen=c.SIGNAL_MAX_SAMPLES)
+    # TODO: clean update signals
 
     @timeit
     def filter_signal(
                 self,
-                signal: deque
-            ) -> deque:
+                signal: deque[float]
+            ) -> deque[float]:
         signal_notnan = np.array(signal)[~np.isnan(signal)]
-        if signal_notnan.size == 0:
-            signal_notnan = [0]
-        default_padlen = 3 * (2 * len(self.sos) + 1 - min((self.sos[:, 2] == 0).sum(), (self.sos[:, 5] == 0).sum()))
-        padlen = len(signal_notnan) - 1 if len(signal_notnan) <= default_padlen else default_padlen
-        signal_filtered_notnan = scipy.signal.sosfiltfilt(self.sos, signal_notnan, padlen=padlen)
         signal_filtered = np.array([np.nan] * len(signal))
-        signal_filtered[~np.isnan(signal)] = signal_filtered_notnan
+        if signal_notnan.size > 0:
+            if c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.RAW:
+                signal_filtered = signal
+            else:
+                if c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.CONST:
+                    signal_filtered_notnan = scipy.signal.detrend(signal_notnan, type='constant')
+                elif c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.LINEAR:
+                    signal_filtered_notnan = scipy.signal.detrend(signal_notnan, type='linear')
+                elif c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.BUTTER:
+                    default_padlen = 3 * (2 * len(self.butter) + 1 - min((self.butter[:, 2] == 0).sum(), (self.butter[:, 5] == 0).sum()))
+                    padlen = signal_notnan.size - 1 if signal_notnan.size <= default_padlen else default_padlen
+                    signal_filtered_notnan = scipy.signal.sosfiltfilt(self.butter, signal_notnan, padlen=padlen)
+                elif c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.FIR:
+                    default_padlen = 3 * len(self.fir)
+                    padlen = signal_notnan.size - 1 if signal_notnan.size <= default_padlen else default_padlen
+                    signal_filtered_notnan = scipy.signal.filtfilt(self.fir, 1, signal_notnan, padlen=padlen)
+                else:
+                    raise NotImplementedError
+                signal_filtered[~np.isnan(signal)] = signal_filtered_notnan
         return deque(signal_filtered, maxlen=c.SIGNAL_MAX_SAMPLES)
 
     @timeit
     def get_dft(
                 self,
-                signal: deque
-            ) -> tuple[np.ndarray, np.ndarray, float]:
-        mean_period = np.nanmean(np.diff(self.timestamps))
+                signal: deque[float]
+            ) -> tuple[np.ndarray[float], np.ndarray[float], float]:
         signal_notnan = np.array(signal)[~np.isnan(signal)]
-        if np.isnan(mean_period) or signal_notnan.size == 0:
-            mean_period = 1
-            signal_notnan = [0]
         timestamps_notnan = np.array(self.timestamps)[~np.isnan(signal)]
+        if signal_notnan.size == 0:
+            signal_notnan = [0]
         if timestamps_notnan.size == 0:
             timestamps_notnan = [0]
         new_timestamps = np.linspace(timestamps_notnan[0], timestamps_notnan[-1])
         new_signal = np.interp(new_timestamps, timestamps_notnan, signal_notnan)
-        period = (self.timestamps[-1] - self.timestamps[0]) / len(self.timestamps)
-        freqs = scipy.fft.rfftfreq(c.SIGNAL_MAX_SAMPLES, period)
+        mean_period = (self.timestamps[-1] - self.timestamps[0]) / len(self.timestamps)
+        freqs = scipy.fft.rfftfreq(c.SIGNAL_MAX_SAMPLES, mean_period)
         spectrum = scipy.fft.rfft(new_signal, n=c.SIGNAL_MAX_SAMPLES, norm='ortho')
         mags = 2 * np.abs(spectrum) / len(new_signal)
         freqs_f = freqs[(freqs >= c.SIGNAL_MIN_FREQUENCY) & (freqs <= c.SIGNAL_MAX_FREQUENCY)]
@@ -114,8 +103,8 @@ class SignalProcessor:
     @timeit
     def get_ls_pgram(
                 self,
-                signal: deque
-            ) -> tuple[np.ndarray, np.ndarray, float]:
+                signal: deque[float]
+            ) -> tuple[np.ndarray[float], np.ndarray[float], float]:
         freqs = np.arange(c.SIGNAL_MIN_FREQUENCY, c.SIGNAL_MAX_FREQUENCY, 0.02)
         timestamps_notnan = np.array(self.timestamps)[~np.isnan(signal)]
         signal_notnan = np.array(signal)[~np.isnan(signal)]
@@ -129,9 +118,9 @@ class SignalProcessor:
     @timeit
     def get_corr(
                 self,
-                signal_0: deque,
-                signal_1: deque
-            ) -> tuple[np.ndarray, np.ndarray, float]:
+                signal_0: deque[float],
+                signal_1: deque[float]
+            ) -> tuple[np.ndarray[float], np.ndarray[float], float]:
         notnan = (~np.isnan(signal_0)) & (~np.isnan(signal_1))
         signal_0_notnan = np.array(signal_0)[notnan]
         signal_1_notnan = np.array(signal_1)[notnan]
@@ -149,64 +138,85 @@ class SignalProcessor:
         peak_lag = lags_f[np.argmax(corr_f)] if corr_f.size > 1 and lags_f.size > 1 else np.nan
         return lags, corr, peak_lag
 
+    # TODO: update_rois, sample_signal, filter_signal, transform_signal, correlate_signals
+
+    # TODO: figure how to reinclude this inside update signals
+    #       or even maybe I should split update signal into its parts to keep it small
+    @timeit
+    def update_rois(
+                self,
+                inference_results: list[tuple[c.ModelType, c.Detections | c.Masks]]
+            ) -> tuple[list[tuple[int, int]], list[tuple[int, int, int, int]]]:
+        _, (_, face_landmarks), (_, hand_landmarks), _ = inference_results
+        mean_pois = []
+        mean_rois = []
+        # TODO: same as below
+        for s in range(self.num_signals):
+            model_type, landmark_indices, (left_m, top_m, right_m, bottom_m) = c.SIGNAL_LOCATION_CONFIGS[s]
+            if model_type is c.ModelType.FACE_LANDMARKER:
+                landmarks = face_landmarks
+            elif model_type is c.ModelType.HAND_LANDMARKER:
+                landmarks = hand_landmarks
+            else:
+                raise NotImplementedError
+            if len(landmarks) > 0:
+                bbox, points = landmarks[0]
+                x_p, y_p = np.squeeze(np.mean([points[i] for i in landmark_indices], axis=0).round().astype(int))
+                self.signal_pois[s].append((x_p, y_p))
+                x_f, y_f = np.squeeze(np.nanmean(self.signal_pois[s], axis=0).round().astype(int))
+                mean_pois.append((x_f, y_f))
+                x_r_0 = int(round(x_p + left_m * (bbox[2] - bbox[0])))
+                y_r_0 = int(round(y_p + top_m * (bbox[3] - bbox[1])))
+                x_r_1 = int(round(x_p + right_m * (bbox[2] - bbox[0])))
+                y_r_1 = int(round(y_p + bottom_m * (bbox[3] - bbox[1])))
+                self.signal_rois[s].append((x_r_0, y_r_0, x_r_1, y_r_1))
+                x_f_0, y_f_0, x_f_1, y_f_1 = np.squeeze(np.nanmean(self.signal_rois[s], axis=0).round().astype(int))
+                mean_rois.append((x_f_0, y_f_0, x_f_1, y_f_1))
+            else:
+                self.signal_pois[s].append((np.nan, np.nan))
+                mean_pois.append((np.nan, np.nan))
+                self.signal_rois[s].append((np.nan, np.nan, np.nan, np.nan))
+                mean_rois.append((np.nan, np.nan, np.nan, np.nan))
+        return mean_pois, mean_rois
+
     @timeit
     def update_signals(
                 self,
                 frame: cv2.typing.MatLike,
                 timestamp: float,
-                landmark_collections: tuple
-            ) -> tuple[list]:
+                mean_pois: list[tuple[int, int]],
+                mean_rois: list[tuple[int, int, int, int]]
+            ) -> tuple[list[c.SignalData], list[c.SignalData], list[c.SignalData], list[float], list[float]]:
 
         self.timestamps.append(timestamp)
 
         time_signals = []
         freq_signals = []
 
-        mean_roi_positions = []
-        mean_roi_bboxes = []
         mean_peak_freqs = []
         mean_peak_lags = []
 
-        gen = zip(landmark_collections, c.ROI_LANDMARK_INDICES, c.ROI_LANDMARK_CONFIGS)
-        for s, (landmarks, landmark_indices, (left_m, top_m, right_m, bottom_m)) in enumerate(gen):
+        # TODO: try and unpack a zip instead of using an index
 
-            if landmarks is not None:
-                _, points, (bbox_height, bbox_width) = landmarks
-                x_roi, y_roi = np.squeeze(np.mean([points[i] for i in landmark_indices], axis=0))
-                self.roi_positions[s].append((x_roi, y_roi))
-                roi_positions_notnan = np.array(self.roi_positions[s])[~np.isnan(self.roi_positions[s]).any(axis=1)]
-                x_f, y_f = np.squeeze(np.mean(roi_positions_notnan, axis=0))
-                mean_roi_positions.append((x_f, y_f))
-                x_0 = int(x_f + left_m * bbox_width)
-                y_0 = int(y_f + top_m * bbox_height)
-                x_1 = int(x_f + right_m * bbox_width)
-                y_1 = int(y_f + bottom_m * bbox_height)
-                mean_roi_bboxes.append((x_0, y_0, x_1, y_1))
-                roi_bgr = frame[y_0:y_1, x_0:x_1, :]
-                if c.PPG_PIXEL_VALUE == c.PPGPixelValue.G:
+        for s in range(self.num_signals):
+
+            # TODO: move this sampling to another function
+
+            if not np.isnan(mean_rois[s]).any():
+                x_f_0, y_f_0, x_f_1, y_f_1 = mean_rois[s]
+                roi_bgr = frame[y_f_0:y_f_1, x_f_0:x_f_1, :]
+                if c.SIGNAL_COLOR_CHANNEL == c.SignalColorChannel.G:
                     values = roi_bgr[..., 1]
-                elif c.PPG_PIXEL_VALUE == c.PPGPixelValue.CG:
+                elif c.SIGNAL_COLOR_CHANNEL == c.SignalColorChannel.CG:
                     values = roi_bgr[..., 1] / 2 - roi_bgr[..., 0] / 4 - roi_bgr[..., 2] / 4 + 0.5
                 else:
                     raise NotImplementedError
                 value = np.mean(values)
                 self.signals_raw[s].append(value)
             else:
-                self.roi_positions[s].append((np.nan, np.nan))
-                mean_roi_positions.append((np.nan, np.nan))
-                mean_roi_bboxes.append((np.nan, np.nan, np.nan, np.nan))
                 self.signals_raw[s].append(np.nan)
 
-            if c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.RAW:
-                self.signals_proc[s] = self.signals_raw[s]
-            elif c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.CONSTANT:
-                self.signals_proc[s] = self.detrend_signal(self.signals_raw[s], 'constant')
-            elif c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.LINEAR:
-                self.signals_proc[s] = self.detrend_signal(self.signals_raw[s], 'linear')
-            elif c.SIGNAL_PROCESSING_METHOD == c.SignalProcessingMethod.BUTTER:
-                self.signals_proc[s] = self.filter_signal(self.signals_raw[s])
-            else:
-                raise NotImplementedError
+            self.signals_proc[s] = self.filter_signal(self.signals_raw[s])
 
             time_signals.append((np.array(self.timestamps), np.array(self.signals_proc[s])))
 
@@ -218,8 +228,7 @@ class SignalProcessor:
                 raise NotImplementedError
 
             self.peak_freqs[s].append(peak_freq)
-            mean_peak_freq = np.nanmean(self.peak_freqs[s])
-            mean_peak_freqs.append(mean_peak_freq)
+            mean_peak_freqs.append(np.nanmean(self.peak_freqs[s]))
 
             freq_signals.append((self.frequencies[s], self.magnitudes[s]))
 
@@ -229,7 +238,6 @@ class SignalProcessor:
                 lags, corr, peak_lag = self.get_corr(signal_0, signal_1)
                 correlations.append((lags, corr))
                 self.peak_lags[s].append(peak_lag)
-                mean_peak_lag = np.nanmean(self.peak_lags[s])
-                mean_peak_lags.append(mean_peak_lag)
+                mean_peak_lags.append(np.nanmean(self.peak_lags[s]))
 
-        return time_signals, freq_signals, mean_peak_freqs, mean_roi_positions, mean_roi_bboxes, correlations, mean_peak_lags
+        return time_signals, freq_signals, correlations, mean_peak_freqs, mean_peak_lags

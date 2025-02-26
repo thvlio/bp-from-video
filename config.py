@@ -5,131 +5,143 @@ import numpy as np
 from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
 
 
-type Detections = list[tuple[list[int, int, int, int], np.ndarray[int], tuple[int, int]]]
-type Masks = tuple[np.ndarray[int], list[np.ndarray[float]]]
+class Config:
 
+    type Detections = list[tuple[tuple[int, int, int, int], np.ndarray[int]]]
+    type Masks = tuple[np.ndarray[int], list[np.ndarray[float]]]
 
-class ModelType(Enum):
-    FACE_DETECTOR = auto()
-    FACE_LANDMARKER = auto()
-    HAND_LANDMARKER = auto()
-    PERSON_SEGMENTER = auto()
+    type SignalData = tuple[np.ndarray[float], np.ndarray[float]]
 
+    class ModelType(Enum):
+        FACE_DETECTOR = auto()
+        FACE_LANDMARKER = auto()
+        HAND_LANDMARKER = auto()
+        PERSON_SEGMENTER = auto()
 
-class SpectrumTransform(Enum):
-    DFT = auto()
-    LS_PGRAM = auto()
+    class SpectrumTransform(Enum):
+        DFT = auto()
+        LS_PGRAM = auto()
 
+    class SignalProcessingMethod(Enum):
+        RAW = auto()
+        CONST = auto()
+        LINEAR = auto()
+        BUTTER = auto()
+        FIR = auto()
 
-class SignalProcessingMethod(Enum):
-    RAW = auto()
-    CONSTANT = auto()
-    LINEAR = auto()
-    BUTTER = auto()
+    class SignalColorChannel(Enum):
+        G = auto()
+        CG = auto()
 
+    class LocationPair(Enum):
+        FACE_FACE = auto()
+        FACE_HAND = auto()
 
-class PPGPixelValue(Enum):
-    G = auto()
-    CG = auto()
+    # ============= #
+    # video reading #
+    # ============= #
 
+    EXPOSURE_ADJUSTMENT_TIME = 5
 
-class CorrelationPair(Enum):
-    FACE_FACE = auto()
-    FACE_HAND = auto()
+    OPTIMAL_FOCUS = 65.0 # 50.0
 
+    # =============== #
+    # model inference #
+    # =============== #
 
-#
+    RUNNING_MODE = VisionTaskRunningMode.VIDEO
 
-FACE_DETECTION_ENABLED = False
-FACE_LANDMARKS_ENABLED = True
-HAND_LANDMARKS_ENABLED = True
-PERSON_SEGMENTATION_ENABLED = False
+    FACE_DETECTION_ENABLED = False
+    FACE_LANDMARKS_ENABLED = True
+    HAND_LANDMARKS_ENABLED = True
+    PERSON_SEGMENTATION_ENABLED = False
 
+    FACE_DETECTION_NOSE_INDEX = 2
+    FACE_LANDMARKS_NOSE_INDEX = 4
+    FACE_LANDMARKS_FOREHEAD_INDEX = 151 # 10
+    FACE_LANDMARKS_CHEEK_INDEX = 330 # 101
+    FACE_LANDMARKS_EYEBROW_INDEX = 337 # 108
+    HAND_LANDMARKS_WRIST_INDEX = 0
+    HAND_LANDMARKS_MIDDLE_INDEX = 9
 
-MODEL_COLORS = [(0, 255, 128),
-                (128, 255, 0),
-                (255, 128, 0),
-                (255, 255, 255)]
+    FACE_CHEEK_CONFIG = (ModelType.FACE_LANDMARKER, [FACE_LANDMARKS_CHEEK_INDEX], (-0.05, -0.05, 0.15, 0.05))
+    FACE_EYEBROW_CONFIG = (ModelType.FACE_LANDMARKER, [FACE_LANDMARKS_EYEBROW_INDEX], (-0.10, -0.15, 0.25, 0.00))
+    FACE_FOREHEAD_CONFIG = (ModelType.FACE_LANDMARKER, [FACE_LANDMARKS_FOREHEAD_INDEX], (-0.00, -0.10, 0.20, 0.05))
 
-LANDMARK_COLOR = (255, 0, 255)
-ROI_COLOR = (0, 0, 255)
+    HAND_WRIST_CONFIG = (ModelType.HAND_LANDMARKER, [HAND_LANDMARKS_WRIST_INDEX], (-0.10, -0.10, 0.10, 0.10))
+    HAND_PALM_CONFIG = (ModelType.HAND_LANDMARKER, [HAND_LANDMARKS_WRIST_INDEX, HAND_LANDMARKS_MIDDLE_INDEX], (-0.10, -0.10, 0.10, 0.10))
 
-LINE_THICKNESS = 1
-LINE_TYPE = cv2.LINE_AA
-POINT_RADIUS = 1
-TEXT_THICKNESS = 2
+    SIGNAL_LOCATION_CONFIGS = (
+        FACE_FOREHEAD_CONFIG,
+        # FACE_CHEEK_CONFIG,
+        HAND_PALM_CONFIG,
+        # HAND_WRIST_CONFIG,
+    )
 
-PLOT_SIZE = (640, 720) # (640, 480)
-PLOT_MARGINS = (40, 40)
+    # ================= #
+    # signal processing #
+    # ================= #
 
-#
+    SPECTRUM_TRANSFORM = SpectrumTransform.LS_PGRAM
+    SIGNAL_PROCESSING_METHOD = SignalProcessingMethod.FIR
+    SIGNAL_COLOR_CHANNEL = SignalColorChannel.G
 
-FACE_DETECTION_NOSE_INDEX = 2
-FACE_LANDMARKS_NOSE_INDEX = 4
-FACE_LANDMARKS_FOREHEAD_INDEX = 151 # 10
-FACE_LANDMARKS_CHEEK_INDEX = 330 # 101
-FACE_LANDMARKS_EYEBROW_INDEX = 337 # 108
-HAND_LANDMARKS_WRIST_INDEX = 0
-HAND_LANDMARKS_MIDDLE_INDEX = 9
+    SIGNAL_MAX_SAMPLES = 100
+    ROI_POS_MAX_SAMPLES = 1
 
-ROI_LANDMARK_INDICES = [
-    # [FACE_LANDMARKS_CHEEK_INDEX],
-    # [FACE_LANDMARKS_EYEBROW_INDEX],
-    [FACE_LANDMARKS_FOREHEAD_INDEX],
-    [HAND_LANDMARKS_WRIST_INDEX, HAND_LANDMARKS_MIDDLE_INDEX]
-    # [HAND_LANDMARKS_WRIST_INDEX]
-]
+    SIGNAL_MIN_FREQUENCY = 0.5
+    SIGNAL_MAX_FREQUENCY = 3.0
 
-ROI_LANDMARK_CONFIGS = [
-    # (-0.05, -0.05, 0.15, 0.05), # (-0.15, -0.05, 0.05, 0.05),
-    # (-0.10, -0.15, 0.25, 0.00), # (-0.15, -0.10, 0.10, 0.00),
-    (-0.00, -0.10, 0.20, 0.05), # (-0.20, -0.10, 0.20, 0.05),
-    (-0.10, -0.10, 0.10, 0.10),
-    # (-0.10, -0.10, 0.10, 0.10)
-]
+    CORR_MIN_LAG = -0.5
+    CORR_MAX_LAG = 0.5
 
-CORRELATION_PAIR = CorrelationPair.FACE_HAND
+    BUTTER_ORDER = 2
+    BUTTER_FS = 15
 
-PERSON_SEGMENTER_CLASSES = {
-    0: 'background',
-    1: 'hair',
-    2: 'body-skin',
-    3: 'face-skin',
-    4: 'clothes',
-    5: 'others (accessories)'
-}
+    FIR_TAPS = 127
+    FIR_DF = 0.1
+    FIR_FS = 15
 
-#
+    CALC_CORRELATION = True
 
-HEATMAP_PADDING = 10
-HEATMAP_POINTS = 478
+    # ==================== #
+    # drawing and plotting #
+    # ==================== #
 
-CALC_HEATMAP = False
+    class Colors(Enum):
+        BLACK = (0, 0, 0)
+        RED = (0, 0, 255)
+        GREEN = (0, 255, 0)
+        BLUE = (255, 0, 0)
+        WHITE = (255, 255, 255)
+        CYAN = (0, 255, 255)
+        MAGENTA = (255, 0, 255)
+        YELLOW = (255, 255, 0)
+        BLUE_AZURE = (255, 128, 0)
+        GREEN_SPRING = (128, 255, 0)
+        GREEN_PARIS = (0, 255, 128)
 
-#
+    MODEL_COLORS = {
+        ModelType.FACE_DETECTOR: Colors.BLUE_AZURE,
+        ModelType.FACE_LANDMARKER: Colors.GREEN_SPRING,
+        ModelType.HAND_LANDMARKER: Colors.GREEN_PARIS,
+        ModelType.PERSON_SEGMENTER: Colors.WHITE
+    }
 
-SPECTRUM_TRANSFORM = SpectrumTransform.LS_PGRAM
-SIGNAL_PROCESSING_METHOD = SignalProcessingMethod.BUTTER
-PPG_PIXEL_VALUE = PPGPixelValue.G
+    LANDMARK_COLOR = Colors.MAGENTA
+    POI_COLOR = Colors.RED
+    ROI_COLOR = Colors.RED
 
-SIGNAL_MAX_SAMPLES = 100
-ROI_POS_MAX_SAMPLES = 1
+    LINE_THICKNESS = 1
+    LINE_TYPE = cv2.LINE_AA
+    POINT_RADIUS = 1
+    TEXT_THICKNESS = 2
 
-SIGNAL_MIN_FREQUENCY = 0.5
-SIGNAL_MAX_FREQUENCY = 3.0
+    PLOT_SIZE = (640, 240 * (2 + CALC_CORRELATION)) # (640, 720) # (640, 480)
+    PLOT_MARGINS = (40, 40)
 
-CORR_MIN_LAG = -0.5
-CORR_MAX_LAG = 0.5
+    # === #
+    # etc #
+    # === #
 
-BUTTER_ORDER = 4
-BUTTER_FS = 15
-
-CALC_CORRELATION = True
-
-#
-
-EXPOSURE_ADJUSTMENT_TIME = 5
-
-OPTIMAL_FOCUS = 65.0 # 50.0
-
-RUNNING_MODE = VisionTaskRunningMode.VIDEO
+    PROFILE_EXEC_TIMES = True

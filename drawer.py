@@ -7,7 +7,7 @@ import matplotlib.colors
 import numpy as np
 from matplotlib import pyplot as plt
 
-import config as c
+from config import Config as c
 from custom_profiler import timeit
 
 
@@ -16,7 +16,6 @@ class Drawer:
     def __init__(
                 self
             ) -> None:
-
         cv2.namedWindow('plot')
         self.plot_width, self.plot_height = c.PLOT_SIZE
         self.plot_shape = (self.plot_height, self.plot_width, 3)
@@ -55,44 +54,35 @@ class Drawer:
             if model_type in [c.ModelType.FACE_DETECTOR, c.ModelType.FACE_LANDMARKER, c.ModelType.HAND_LANDMARKER]:
                 if len(result) == 0:
                     continue
-                color = c.MODEL_COLORS[model_type.value]
-                for bbox, points, _ in result:
+                color = c.MODEL_COLORS[model_type].value
+                for bbox, points in result:
                     x_0, y_0, x_1, y_1 = bbox
                     self.drawn = cv2.rectangle(self.drawn, (x_0, y_0), (x_1, y_1), color, c.LINE_THICKNESS, c.LINE_TYPE)
                     for x_p, y_p in points:
                         self.drawn = cv2.circle(self.drawn, (x_p, y_p), c.POINT_RADIUS, color, c.LINE_THICKNESS, c.LINE_TYPE)
-            elif model_type == c.ModelType.PERSON_SEGMENTER:
+            elif model_type is c.ModelType.PERSON_SEGMENTER:
                 class_mask, conf_masks = result
                 if class_mask.size == 0:
                     continue
-                face_conf_mask = (conf_masks[3] * 255).round().astype(np.uint8)
-                self.drawn = cv2.cvtColor(face_conf_mask, cv2.COLOR_GRAY2BGR)
+                # face_conf_mask = (conf_masks[3] * 255).round().astype(np.uint8)
+                # self.drawn = cv2.cvtColor(face_conf_mask, cv2.COLOR_GRAY2BGR)
+                self.drawn = (self.drawn * np.expand_dims(conf_masks[3], 2)).round().astype(np.uint8)
             else:
                 raise NotImplementedError
 
     @timeit
     def draw_rois(
                 self,
-                roi_centers: list[deque],
+                roi_references: list[deque],
                 roi_bboxes: list[deque]
             ) -> None:
-        roi_centers = [c for c in roi_centers]
-        roi_bboxes = [b for b in roi_bboxes]
-        for (x_f, y_f), (x_0, y_0, x_1, y_1), color in zip(roi_centers, roi_bboxes, self.plot_graph_colors):
+        roi_references = list(roi_references)
+        roi_bboxes = list(roi_bboxes)
+        for (x_f, y_f), (x_0, y_0, x_1, y_1), color in zip(roi_references, roi_bboxes, self.plot_graph_colors):
             if np.isnan([x_f, y_f, x_0, x_1, y_0, y_1]).any():
                 continue
             self.drawn = cv2.rectangle(self.drawn, (x_0, y_0), (x_1, y_1), color, c.LINE_THICKNESS, c.LINE_TYPE)
             self.drawn = cv2.drawMarker(self.drawn, (int(x_f), int(y_f)), color, cv2.MARKER_CROSS, c.LINE_THICKNESS*5, c.LINE_THICKNESS, c.LINE_TYPE)
-
-    @timeit
-    def draw_heatmap(
-                self,
-                points: np.ndarray,
-                variations: list[float]
-            ) -> None:
-        for (x_p, y_p), variation in zip(points, variations):
-            r, g, b, _ = self.cmap(np.clip(variation * 10, 0.0, 1.0))
-            self.drawn = cv2.circle(self.drawn, (x_p, y_p), 5, (int(b*255), int(g*255), int(r*255)), -1, c.LINE_TYPE)
 
     def write_text(
                 self,
@@ -135,19 +125,19 @@ class Drawer:
                 graph_origin_x: int,
                 graph_origin_y: int,
                 color: tuple[np.uint8],
-            ) -> cv2.typing.MatLike:
+            ) -> None:
         min_x, max_x = range_x
-        max_y, min_y = range_y
-        drawn = self.plot.copy()
-        data_x_p = (data_x - min_x) / (max_x - min_x) * self.plot_graph_width + graph_origin_x
-        data_y_p = (data_y - min_y) / (max_y - min_y) * self.plot_graph_height + graph_origin_y
+        # max_y, min_y = range_y
+        min_y, max_y = range_y
+        graph_cond = (data_x >= min_x) & (data_x <= max_x) & (data_y >= min_y) & (data_y <= max_y)
+        data_x_p = (data_x[graph_cond] - min_x) / (max_x - min_x) * self.plot_graph_width + graph_origin_x
+        data_y_p = (data_y[graph_cond] - max_y) / (min_y - max_y) * self.plot_graph_height + graph_origin_y
         groups = itertools.groupby(np.vstack((data_x_p, data_y_p)).T, lambda k: np.all(np.isfinite(k)))
         for isfinite, group in groups:
             if not isfinite:
                 continue
             data_g = np.vstack(list(group)).astype(int)
-            drawn = cv2.polylines(drawn, [data_g], False, color, lineType=c.LINE_TYPE)
-        return drawn
+            self.plot = cv2.polylines(self.plot, [data_g], False, color, lineType=c.LINE_TYPE)
 
     @timeit
     def draw_signals(
@@ -199,9 +189,9 @@ class Drawer:
                     div_point_0 = (div_x_p, graph_origin_y)
                     div_point_1 = (div_x_p, graph_origin_y + self.plot_graph_height)
                     self.plot = cv2.line(self.plot, div_point_0, div_point_1, (224, 224, 224), lineType=c.LINE_TYPE)
-                    (tw, th), _ = cv2.getTextSize(f'{min_x: .2f}', cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, 1)
-                    num_point = (div_x_p - tw // 2, graph_origin_y + self.plot_graph_height + th)
-                    self.plot = cv2.putText(self.plot, f'{min_x: .2f}', num_point, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, (160, 160, 160), lineType=c.LINE_TYPE)
+                    (tw, th), _ = cv2.getTextSize(f'{x: .2f}', cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, 1)
+                    num_point = (div_x_p - tw // 2, graph_origin_y + self.plot_graph_height + th + 5)
+                    self.plot = cv2.putText(self.plot, f'{x: .2f}', num_point, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, (160, 160, 160), lineType=c.LINE_TYPE)
 
             if min_x <= 0.0 <= max_x:
                 axis_x_n = np.nan_to_num(max_x / (max_x - min_x), nan=0.0, neginf=0.0, posinf=1.0)
@@ -227,7 +217,7 @@ class Drawer:
             self.plot = cv2.putText(self.plot, f'{max_y: .2f}', pos_max_y, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, (0, 0, 0), lineType=c.LINE_TYPE)
 
             for (data_x, data_y), color in zip(signal_group, self.plot_graph_colors):
-                self.plot = self._draw_signal(data_x, data_y, group_range_x, group_range_y, graph_origin_x, graph_origin_y, color)
+                self._draw_signal(data_x, data_y, group_range_x, group_range_y, graph_origin_x, graph_origin_y, color)
 
         cv2.moveWindow('plot', 1080, 0)
         cv2.imshow('plot', self.plot)

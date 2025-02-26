@@ -1,13 +1,12 @@
 import cv2
 import numpy as np
 
-import config as c
+from config import Config as c
+from custom_profiler import printit
 from drawer import Drawer
 from inference_runner import InferenceRunner
 from signal_processor import SignalProcessor
 from video_reader import VideoReader
-
-from custom_profiler import printit
 
 
 def main():
@@ -20,6 +19,8 @@ def main():
     # video_reader = VideoReader('/home/thulio/Downloads/20250209_185615.mp4', (640, 360))
 
     inference_runner = InferenceRunner(running_mode=c.RUNNING_MODE)
+
+    print('-' * 80)
 
     signal_processor = SignalProcessor()
 
@@ -40,7 +41,7 @@ def main():
         (cv2.CAP_PROP_GAIN, 4, 'cv2.CAP_PROP_GAIN'), # 31 []
     ]
 
-    prop_idx = 0
+    prop_idx = 5
 
     while True:
 
@@ -52,35 +53,19 @@ def main():
         timestamp_ms = int(timestamp * 1000)
         inference_results = inference_runner.run_pipe(frame, timestamp_ms)
 
-        # face_detector_results, face_landmarker_results, hand_landmarker_results, person_segmenter_results = inference_results
-        _, (_, face_landmarks), (_, hand_landmarks), _ = inference_results
+        mean_pois, mean_rois = signal_processor.update_rois(inference_results)
 
-        if c.CORRELATION_PAIR == c.CorrelationPair.FACE_FACE:
-            largest_face_landmarks = face_landmarks[np.argmax([h * w for _, _, (h, w) in face_landmarks])] if face_landmarks != [] else None
-            landmarks_collection = [largest_face_landmarks, largest_face_landmarks]
-        elif c.CORRELATION_PAIR == c.CorrelationPair.FACE_HAND:
-            largest_face_landmarks = face_landmarks[np.argmax([h * w for _, _, (h, w) in face_landmarks])] if face_landmarks != [] else None
-            largest_hand_landmarks = hand_landmarks[np.argmax([h * w for _, _, (h, w) in hand_landmarks])] if hand_landmarks != [] else None
-            landmarks_collection = [largest_face_landmarks, largest_hand_landmarks]
-        else:
-            raise NotImplementedError
-
-        time_signals, freq_signals, peak_freqs_filtered, mean_roi_positions, roi_bboxes, correlations, peak_lags_filtered = \
-            signal_processor.update_signals(frame, timestamp, landmarks_collection)
+        time_signals, freq_signals, correlations, mean_peak_freqs, mean_peak_lags = signal_processor.update_signals(frame, timestamp, mean_pois, mean_rois)
 
         drawer.draw_signals(time_signals, freq_signals, correlations)
 
         drawer.set_frame(frame)
 
         sampling_rate = 1 / (timestamp - timestamp_prev)
-        drawer.write_info(video_reader.auto_adjust, sampling_rate, peak_freqs_filtered, peak_lags_filtered)
+        drawer.write_info(video_reader.auto_adjust, sampling_rate, mean_peak_freqs, mean_peak_lags)
 
         drawer.draw_results(inference_results)
-        drawer.draw_rois(mean_roi_positions, roi_bboxes)
-
-        if c.CALC_HEATMAP and largest_face_landmarks is not None:
-            variations = signal_processor.update_heatmap(frame, largest_face_landmarks[1]) # pylint: disable=E1136
-            drawer.draw_heatmap(largest_face_landmarks[1], variations) # pylint: disable=E1136
+        drawer.draw_rois(mean_pois, mean_rois)
 
         cv2.moveWindow('frame', 1080 + 1920 // 2 - frame.shape[1] // 2, 0)
         cv2.imshow('frame', drawer.get_frame())
@@ -89,22 +74,19 @@ def main():
             break
 
         prop_id, inc_value, prop_name = props[prop_idx]
-        if key == ord('8'):
-            video_reader.cap.set(prop_id, video_reader.cap.get(prop_id) + inc_value)
+        if ord('0') <= key <= ord('9'):
+            if key == ord('8'):
+                video_reader.cap.set(prop_id, video_reader.cap.get(prop_id) + inc_value)
+            elif key == ord('2'):
+                video_reader.cap.set(prop_id, video_reader.cap.get(prop_id) - inc_value)
+            elif key == ord('4'):
+                prop_idx = (prop_idx - 1) % len(props)
+            elif key == ord('6'):
+                prop_idx = (prop_idx + 1) % len(props)
+            elif key == ord('0'):
+                video_reader.cap.set(cv2.CAP_PROP_FOCUS, c.OPTIMAL_FOCUS)
+            prop_id, inc_value, prop_name = props[prop_idx]
             print(f'{prop_name}: {video_reader.cap.get(prop_id)}')
-        elif key == ord('2'):
-            video_reader.cap.set(prop_id, video_reader.cap.get(prop_id) - inc_value)
-            print(f'{prop_name}: {video_reader.cap.get(prop_id)}')
-        elif key == ord('4'):
-            p = (p - 1) % len(props)
-            print(f'{prop_name}: {video_reader.cap.get(prop_id)}')
-        elif key == ord('5'):
-            print(f'{prop_name}: {video_reader.cap.get(prop_id)}')
-        elif key == ord('6'):
-            p = (p + 1) % len(props)
-            print(f'{prop_name}: {video_reader.cap.get(prop_id)}')
-        elif key == ord('0'):
-            video_reader.cap.set(cv2.CAP_PROP_FOCUS, c.OPTIMAL_FOCUS)
 
         timestamp_prev = timestamp
 
@@ -112,6 +94,8 @@ def main():
         # printit(clear=True)
 
     cv2.destroyAllWindows()
+
+    video_reader.auto_adjust_props(True)
 
     printit()
 
