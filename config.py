@@ -18,9 +18,9 @@ class Config:
         HAND_LANDMARKER = auto()
         PERSON_SEGMENTER = auto()
 
-    class SpectrumTransform(Enum):
-        DFT = auto()
-        LS_PGRAM = auto()
+    class SignalColorChannel(Enum):
+        G = auto()
+        CG = auto()
 
     class SignalProcessingMethod(Enum):
         RAW = auto()
@@ -29,9 +29,9 @@ class Config:
         BUTTER = auto()
         FIR = auto()
 
-    class SignalColorChannel(Enum):
-        G = auto()
-        CG = auto()
+    class SignalSpectrumTransform(Enum):
+        DFT = auto()
+        LS_PGRAM = auto()
 
     class LocationPair(Enum):
         FACE_FACE = auto()
@@ -82,24 +82,26 @@ class Config:
     # signal processing #
     # ================= #
 
-    SPECTRUM_TRANSFORM = SpectrumTransform.LS_PGRAM
-    SIGNAL_PROCESSING_METHOD = SignalProcessingMethod.FIR
+    SIGNAL_INTERPOLATION = True
+
     SIGNAL_COLOR_CHANNEL = SignalColorChannel.G
+    SIGNAL_PROCESSING_METHOD = SignalProcessingMethod.FIR
+    SIGNAL_SPECTRUM_TRANSFORM = SignalSpectrumTransform.LS_PGRAM
 
     SIGNAL_MAX_SAMPLES = 100
     ROI_POS_MAX_SAMPLES = 1
 
-    SIGNAL_MIN_FREQUENCY = 0.5
-    SIGNAL_MAX_FREQUENCY = 3.0
+    SIGNAL_MIN_FREQUENCY = 0.8
+    SIGNAL_MAX_FREQUENCY = 7.0
 
     CORR_MIN_LAG = -0.5
     CORR_MAX_LAG = 0.5
 
-    BUTTER_ORDER = 2
+    BUTTER_ORDER = 16
     BUTTER_FS = 15
 
     FIR_TAPS = 127
-    FIR_DF = 0.1
+    FIR_DF = 0.3
     FIR_FS = 15
 
     CALC_CORRELATION = True

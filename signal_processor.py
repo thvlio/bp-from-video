@@ -50,6 +50,11 @@ class SignalProcessor:
 
     # TODO: clean update signals
 
+    # TODO: add option to get uniform sample rate signal
+    #       use splines to interpolate to periodic timestamps
+
+    # TODO: also process 1st and 2nd derivatives of the signal
+
     @timeit
     def filter_signal(
                 self,
@@ -220,9 +225,9 @@ class SignalProcessor:
 
             time_signals.append((np.array(self.timestamps), np.array(self.signals_proc[s])))
 
-            if c.SPECTRUM_TRANSFORM == c.SpectrumTransform.DFT:
+            if c.SIGNAL_SPECTRUM_TRANSFORM == c.SignalSpectrumTransform.DFT:
                 self.frequencies[s], self.magnitudes[s], peak_freq = self.get_dft(self.signals_proc[s])
-            elif c.SPECTRUM_TRANSFORM == c.SpectrumTransform.LS_PGRAM:
+            elif c.SIGNAL_SPECTRUM_TRANSFORM == c.SignalSpectrumTransform.LS_PGRAM:
                 self.frequencies[s], self.magnitudes[s], peak_freq = self.get_ls_pgram(self.signals_proc[s])
             else:
                 raise NotImplementedError
