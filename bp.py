@@ -1,8 +1,10 @@
+import math
+
 import cv2
 import numpy as np
 
-from config import Config as c
 from custom_profiler import printit
+from data import SignalCollection
 from drawer import Drawer
 from inference_runner import InferenceRunner
 from signal_processor import SignalProcessor
@@ -11,6 +13,8 @@ from video_reader import VideoReader
 
 def main():
 
+    profile_exec_times = True
+
     # video_reader = VideoReader(0, (720, 1280))
     # video_reader = VideoReader(0, (360, 640))
     # video_reader = VideoReader(0, (240, 320))
@@ -18,30 +22,35 @@ def main():
     # video_reader = VideoReader('/home/thulio/Downloads/20250213_174156.mp4', (640, 360)) # 320, 180
     # video_reader = VideoReader('/home/thulio/Downloads/20250209_185615.mp4', (640, 360))
 
-    inference_runner = InferenceRunner(running_mode=c.RUNNING_MODE)
+    inference_runner = InferenceRunner()
 
-    print('-' * 80)
+    warmup_steps = 10
+    for _ in range(warmup_steps):
+        read, frame, timestamp = video_reader.read_frame()
+        if not read:
+            raise RuntimeWarning
+        inference_runner.run_pipe(frame, int(timestamp * 1000))
 
     signal_processor = SignalProcessor()
 
     drawer = Drawer()
+
+    roi_max_samples = 1
+    signal_max_samples = 200
+    peak_max_samples = 50
+
+    num_signals = len(inference_runner.roi_configs)
+    signals_roi = SignalCollection(num_signals, fill_value_y=(np.nan,)*6, max_length=roi_max_samples)
+    signals_raw = SignalCollection(num_signals, max_length=signal_max_samples)
+    signals_bpm = SignalCollection(num_signals, max_length=peak_max_samples)
+    signals_ptt = SignalCollection(math.comb(num_signals, 2), max_length=peak_max_samples)
 
     timestamp = np.nan
     timestamp_prev = np.nan
 
     cv2.namedWindow('frame')
 
-    props = [
-        (cv2.CAP_PROP_FOCUS, 5, 'cv2.CAP_PROP_FOCUS'), # 50 [0, 250]
-        (cv2.CAP_PROP_WB_TEMPERATURE, 100, 'cv2.CAP_PROP_WB_TEMPERATURE'), # 4783 [2000, 6500]
-        (cv2.CAP_PROP_BRIGHTNESS, 4, 'cv2.CAP_PROP_BRIGHTNESS'), # 128 [0, 255]
-        (cv2.CAP_PROP_CONTRAST, 4, 'cv2.CAP_PROP_CONTRAST'), # 128 [0, 255]
-        (cv2.CAP_PROP_SATURATION, 4, 'cv2.CAP_PROP_SATURATION'), # 128 [0, 255]
-        (cv2.CAP_PROP_EXPOSURE, 128, 'cv2.CAP_PROP_EXPOSURE'), # 128 [0, 255]
-        (cv2.CAP_PROP_GAIN, 4, 'cv2.CAP_PROP_GAIN'), # 31 []
-    ]
-
-    prop_idx = 5
+    print('-' * 80)
 
     while True:
 
@@ -50,22 +59,36 @@ def main():
         if not read:
             break
 
-        timestamp_ms = int(timestamp * 1000)
-        inference_results = inference_runner.run_pipe(frame, timestamp_ms)
+        inference_results = inference_runner.run_pipe(frame, int(timestamp * 1000))
 
-        mean_pois, mean_rois = signal_processor.update_rois(inference_results)
+        rois = inference_runner.calc_rois(inference_results)
+        signals_roi.add_samples(timestamp, rois)
+        rois = signals_roi.get_means(as_int=True)
 
-        time_signals, freq_signals, correlations, mean_peak_freqs, mean_peak_lags = signal_processor.update_signals(frame, timestamp, mean_pois, mean_rois)
+        samples = signal_processor.sample_signals(frame, rois)
+        signals_raw.add_samples(timestamp, samples)
 
-        drawer.draw_signals(time_signals, freq_signals, correlations)
+        signals_proc = signal_processor.process_signals(signals_raw)
+
+        signals_spectrum = signal_processor.transform_signals(signals_proc)
+        signals_bpm.add_samples(timestamp, [f * 60 for f, _ in signals_spectrum.get_peaks()])
+
+        signals_corr = signal_processor.correlate_signals(signals_proc)
+        signals_ptt.add_samples(timestamp, [t * 1000 for t, _ in signals_corr.get_peaks()])
 
         drawer.set_frame(frame)
 
-        sampling_rate = 1 / (timestamp - timestamp_prev)
-        drawer.write_info(video_reader.auto_adjust, sampling_rate, mean_peak_freqs, mean_peak_lags)
-
         drawer.draw_results(inference_results)
-        drawer.draw_rois(mean_pois, mean_rois)
+        drawer.draw_rois(rois)
+
+        auto_adjust = video_reader.auto_adjust
+        curr_fs = 1 / (timestamp - timestamp_prev)
+        mean_fs = signals_proc.signals[0].get_fs()
+        mean_bpms = signals_bpm.get_means(as_int=True)
+        mean_ptts = signals_ptt.get_means(as_int=True)
+        drawer.write_info(auto_adjust, curr_fs, mean_fs, mean_bpms, mean_ptts)
+
+        drawer.draw_signals(signals_proc, signals_spectrum, signals_corr)
 
         cv2.moveWindow('frame', 1080 + 1920 // 2 - frame.shape[1] // 2, 0)
         cv2.imshow('frame', drawer.get_frame())
@@ -73,20 +96,7 @@ def main():
         if key == ord('q'):
             break
 
-        prop_id, inc_value, prop_name = props[prop_idx]
-        if ord('0') <= key <= ord('9'):
-            if key == ord('8'):
-                video_reader.cap.set(prop_id, video_reader.cap.get(prop_id) + inc_value)
-            elif key == ord('2'):
-                video_reader.cap.set(prop_id, video_reader.cap.get(prop_id) - inc_value)
-            elif key == ord('4'):
-                prop_idx = (prop_idx - 1) % len(props)
-            elif key == ord('6'):
-                prop_idx = (prop_idx + 1) % len(props)
-            elif key == ord('0'):
-                video_reader.cap.set(cv2.CAP_PROP_FOCUS, c.OPTIMAL_FOCUS)
-            prop_id, inc_value, prop_name = props[prop_idx]
-            print(f'{prop_name}: {video_reader.cap.get(prop_id)}')
+        video_reader.prop_control(key)
 
         timestamp_prev = timestamp
 
