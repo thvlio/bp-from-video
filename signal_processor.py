@@ -133,6 +133,7 @@ class SignalProcessor:
 
         self.color_channel = SignalColorChannel.GREEN
         self.processing_methods = [
+            # SignalProcessingMethod.DIFF_1,
             SignalProcessingMethod.INTERP_LINEAR,
             SignalProcessingMethod.FILTER_BUTTER
         ]
@@ -199,11 +200,9 @@ class SignalProcessor:
         if valid.sum() >= 2 and np.isfinite(fs):
             for method in self.processing_methods:
                 if method == SignalProcessingMethod.DIFF_1:
-                    raise NotImplementedError
-                    # TODO: add diff 1
+                    y[valid] = np.diff(y[valid], n=1, axis=0, prepend=y[valid][0])
                 elif method == SignalProcessingMethod.DIFF_2:
-                    raise NotImplementedError
-                    # TODO: add diff 2
+                    y[valid] = np.diff(y[valid], n=2, axis=0, prepend=y[valid][:2])
                 elif method == SignalProcessingMethod.INTERP_LINEAR:
                     x_interp_block, ts = np.linspace(x[block][0], x[block][-1], block.sum(), retstep=True)
                     y_interp_block = np.interp(x_interp_block, x[valid], y[valid])
@@ -211,8 +210,12 @@ class SignalProcessor:
                     valid = block
                     fs = 1 / ts
                 elif method == SignalProcessingMethod.INTERP_BSPLINE:
-                    raise NotImplementedError
-                    # TODO: add b spline option for interp
+                    cs = scipy.interpolate.CubicSpline(x[valid], y[valid], axis=0)
+                    x_interp_block, ts = np.linspace(x[block][0], x[block][-1], block.sum(), retstep=True)
+                    y_interp_block = cs(x_interp_block)
+                    x[block], y[block] = x_interp_block, y_interp_block
+                    valid = block
+                    fs = 1 / ts
                 elif method == SignalProcessingMethod.DETREND_CONST:
                     y_detrended_valid = scipy.signal.detrend(y[valid], type='constant')
                     y[valid] = y_detrended_valid
