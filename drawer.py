@@ -5,7 +5,8 @@ import matplotlib
 import matplotlib.colors
 import numpy as np
 
-from custom_profiler import timeit
+# from custom_profiler import timeit
+from custom_profiler import profiler
 from inference_runner import Detections, Masks, Location, ModelType
 from signal_processor import SignalCollection
 
@@ -64,7 +65,7 @@ class Drawer:
     def get_frame(self, alpha: float = 0.75) -> cv2.typing.MatLike:
         return cv2.addWeighted(self.drawn, alpha, self.original, 1.0-alpha, 0.0)
 
-    @timeit
+    @profiler.timeit
     def draw_results(self, results: list[tuple[ModelType, Detections | Masks]]) -> None:
         for model_type, result in results:
             if model_type in [ModelType.FACE_DETECTOR, ModelType.FACE_LANDMARKER, ModelType.HAND_LANDMARKER]:
@@ -84,7 +85,7 @@ class Drawer:
             else:
                 raise NotImplementedError
 
-    @timeit
+    @profiler.timeit
     def draw_rois(self, rois: list[Location]) -> None:
         for (x, y, x_0, y_0, x_1, y_1), color in zip(rois, self.signal_colors):
             if not np.isnan([x, y, x_0, x_1, y_0, y_1]).any():
@@ -98,7 +99,7 @@ class Drawer:
         self.drawn = cv2.putText(self.drawn, text, (text_x, text_y), cv2.FONT_HERSHEY_COMPLEX, font_size, color, self.line_thickness, self.line_type)
         self.curr_text_index += 1
 
-    @timeit
+    @profiler.timeit
     def write_info(self, auto_adjust: bool, curr_fs: float, mean_fs: float, mean_bpms: list[float], mean_ptts: list[float]) -> None:
         self.curr_text_index = 0
         self.write_text(f'curr_fs: {curr_fs:.2f} Hz', Colors.BLUE)
@@ -115,7 +116,7 @@ class Drawer:
         if auto_adjust:
             self.write_text('adjusting exposure & focus', Colors.RED)
 
-    @timeit
+    @profiler.timeit
     def _draw_graph(self,
                     graph_origin: tuple[int, int],
                     graph_range_x: tuple[float, float],
@@ -160,7 +161,7 @@ class Drawer:
         self.plot = cv2.putText(self.plot, f'{min_y: .2f}', pos_min_y, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, Colors.BLACK, lineType=self.line_type)
         self.plot = cv2.putText(self.plot, f'{max_y: .2f}', pos_max_y, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, Colors.BLACK, lineType=self.line_type)
 
-    @timeit
+    @profiler.timeit
     def _draw_signals(self,
                       signal_collection: SignalCollection,
                       graph_origin: tuple[int, int],
@@ -180,7 +181,7 @@ class Drawer:
                     data_g = np.vstack(list(group)).astype(int)
                     self.plot = cv2.polylines(self.plot, [data_g], False, color, lineType=self.line_type)
 
-    @timeit
+    @profiler.timeit
     def draw_signals(self, time_signals: SignalCollection, freq_signals: SignalCollection, corr_signals: SignalCollection) -> None:
         self.plot = np.full_like(self.plot, 255)
         signal_collections = [time_signals, freq_signals, corr_signals]

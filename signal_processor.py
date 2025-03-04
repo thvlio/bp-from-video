@@ -9,7 +9,8 @@ import scipy.interpolate
 import scipy.signal
 import scipy.stats
 
-from custom_profiler import timeit
+# from custom_profiler import timeit
+from custom_profiler import profiler
 from inference_runner import Location
 
 type SignalXtype = int | float
@@ -154,7 +155,7 @@ class SignalProcessor:
         self.min_corr = -1.0
         self.max_corr = 1.0
 
-    @timeit
+    @profiler.timeit
     def make_filter(self, signal_processing_method, sampling_freq) -> np.ndarray:
         if signal_processing_method == SignalProcessingMethod.FILTER_BUTTER:
             bands = [self.min_freq,
@@ -172,7 +173,7 @@ class SignalProcessor:
             raise NotImplementedError
         return filt
 
-    @timeit
+    @profiler.timeit
     def sample_signal(self, frame: cv2.typing.MatLike, roi: Location) -> SignalYtype:
         if not np.isnan(roi).any():
             _, _, x_0, y_0, x_1, y_1 = roi
@@ -188,11 +189,11 @@ class SignalProcessor:
             value = np.nan
         return value
 
-    @timeit
+    @profiler.timeit
     def sample_signals(self, frame: cv2.typing.MatLike, rois: list[Location]) -> list[SignalYtype]:
         return [self.sample_signal(frame, r) for r in rois]
 
-    @timeit
+    @profiler.timeit
     def process_signal(self, signal_raw: Signal) -> Signal:
         x, y = np.array(signal_raw.x), np.array(signal_raw.y)
         block, valid = signal_raw.v, signal_raw.w
@@ -240,11 +241,11 @@ class SignalProcessor:
         signal_proc.set_range()
         return signal_proc
 
-    @timeit
+    @profiler.timeit
     def process_signals(self, signals_raw: SignalCollection) -> SignalCollection:
         return SignalCollection(signals=[self.process_signal(s) for s in signals_raw])
 
-    @timeit
+    @profiler.timeit
     def transform_signal(self, signal_proc: Signal) -> Signal:
         x, y = np.array(signal_proc.x), np.array(signal_proc.y)
         valid = signal_proc.w
@@ -272,11 +273,11 @@ class SignalProcessor:
         signal_spectrum.set_range((self.min_freq, self.max_freq), (self.min_mag, self.max_mag))
         return signal_spectrum
 
-    @timeit
+    @profiler.timeit
     def transform_signals(self, signals_proc: SignalCollection) -> SignalCollection:
         return SignalCollection(signals=[self.transform_signal(s) for s in signals_proc])
 
-    @timeit
+    @profiler.timeit
     def correlate_signal_pair(self, signal_a: Signal, signal_b: Signal) -> Signal:
         x_a, y_a = np.array(signal_a.x), np.array(signal_a.y)
         _, y_b = np.array(signal_b.x), np.array(signal_b.y)
@@ -294,6 +295,6 @@ class SignalProcessor:
         signal_corr.set_range((self.min_lag, self.max_lag), (self.min_corr, self.max_corr))
         return signal_corr
 
-    @timeit
+    @profiler.timeit
     def correlate_signals(self, signals_proc: SignalCollection) -> SignalCollection:
         return SignalCollection(signals=[self.correlate_signal_pair(s_a, s_b) for s_a, s_b in itertools.combinations(signals_proc, 2)])

@@ -3,7 +3,8 @@ import math
 import cv2
 import numpy as np
 
-from custom_profiler import printit
+# from custom_profiler import printit
+from custom_profiler import profiler
 from drawer import Drawer
 from inference_runner import InferenceRunner
 from signal_processor import SignalCollection, SignalProcessor
@@ -12,7 +13,7 @@ from video_reader import VideoReader
 
 def main():
 
-    profile_exec_times = True
+    profiler.deactivate = False
 
     # video_reader = VideoReader(0, (720, 1280))
     # video_reader = VideoReader(0, (360, 640))
@@ -106,7 +107,7 @@ def main():
 
     video_reader.auto_adjust_props(True)
 
-    printit()
+    profiler.printit()
 
 
 if __name__ == '__main__':

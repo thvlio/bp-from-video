@@ -3,56 +3,39 @@ import functools
 import io
 import pstats
 
-_PROFILER = cProfile.Profile(subcalls=False, builtins=False)
 
-_FUNCS = []
+class Profiler:
 
-# TODO: try to implement as class again
+    def __init__(self, deactivate: bool = False):
+        self._profiler = cProfile.Profile(subcalls=False, builtins=False)
+        self._funcs = []
+        self.deactivate = deactivate
 
-DEACTIVATE = False
+    def timeit(self, func):
+        @functools.wraps(func)
+        def run_func(*args, **kwargs):
+            if self.deactivate:
+                return func(*args, **kwargs)
+            try:
+                self._profiler.enable()
+            except ValueError:
+                return func(*args, **kwargs)
+            try:
+                return func(*args, **kwargs)
+            finally:
+                self._profiler.disable()
+        if func.__name__ not in self._funcs:
+            self._funcs.append(func.__name__)
+        return run_func
 
-
-# def timeit(func, deactivate: bool = False):
-#     @functools.wraps(func)
-#     def run_func(*args, **kwargs):
-#         if deactivate:
-#             return func(*args, **kwargs)
-#         try:
-#             _PROFILER.enable()
-#         except ValueError:
-#             return func(*args, **kwargs)
-#         try:
-#             return func(*args, **kwargs)
-#         finally:
-#             _PROFILER.disable()
-#     if func.__name__ not in _FUNCS:
-#         _FUNCS.append(func.__name__)
-#     return run_func
-
-
-def timeit(func):
-    @functools.wraps(func)
-    def run_func(*args, **kwargs):
-        if DEACTIVATE:
-            return func(*args, **kwargs)
-        try:
-            _PROFILER.enable()
-        except ValueError:
-            return func(*args, **kwargs)
-        try:
-            return func(*args, **kwargs)
-        finally:
-            _PROFILER.disable()
-    if func.__name__ not in _FUNCS:
-        _FUNCS.append(func.__name__)
-    return run_func
+    def printit(self, clear: bool = False) -> None:
+        if not self.deactivate:
+            sio = io.StringIO()
+            ps = pstats.Stats(self._profiler, stream=sio)
+            ps.strip_dirs().sort_stats(pstats.SortKey.STDNAME).print_stats('|'.join(self._funcs))
+            print(sio.getvalue())
+            if clear:
+                self._profiler.clear()
 
 
-def printit(clear: bool = False) -> None:
-    if not DEACTIVATE:
-        sio = io.StringIO()
-        ps = pstats.Stats(_PROFILER, stream=sio)
-        ps.strip_dirs().sort_stats(pstats.SortKey.STDNAME).print_stats('|'.join(_FUNCS))
-        print(sio.getvalue())
-        if clear:
-            _PROFILER.clear()
+profiler = Profiler()

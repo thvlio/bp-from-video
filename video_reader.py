@@ -3,7 +3,8 @@ import time
 import cv2
 import numpy as np
 
-from custom_profiler import timeit
+# from custom_profiler import timeit
+from custom_profiler import profiler
 
 
 class VideoReader:
@@ -44,7 +45,7 @@ class VideoReader:
         self.cap.set(cv2.CAP_PROP_AUTO_WB, 2 * int(enable) + 1)
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 2 * int(enable) + 1)
 
-    @timeit
+    @profiler.timeit
     def read_frame(self, crop_portrait: bool = False, flip_horizontally: bool = False) -> tuple[bool, cv2.typing.MatLike, float]:
         if isinstance(self.path, int):
             timestamp = time.time() - self.timestamp_ref

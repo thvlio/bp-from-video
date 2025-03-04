@@ -10,7 +10,8 @@ from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarker, FaceLa
 from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarker, HandLandmarkerOptions
 from mediapipe.tasks.python.vision.image_segmenter import ImageSegmenter, ImageSegmenterOptions
 
-from custom_profiler import timeit
+# from custom_profiler import timeit
+from custom_profiler import profiler
 
 type Detections = list[tuple[tuple[int, int, int, int], np.ndarray[int]]]
 type Masks = tuple[np.ndarray[int], list[np.ndarray[float]]]
@@ -42,7 +43,7 @@ HAND_PALM_CONFIG = (ModelType.HAND_LANDMARKER, [HAND_LANDMARKS_WRIST_INDEX, HAND
 
 class InferenceRunner:
 
-    @timeit
+    @profiler.timeit
     def __init__(self,
                  face_detection_enabled: bool = False,
                  face_landmarks_enabled: bool = True,
@@ -73,7 +74,7 @@ class InferenceRunner:
             person_segmenter_options = ImageSegmenterOptions(BaseOptions(person_segmenter_path), self.running_mode, True, True)
             self.person_segmenter = ImageSegmenter.create_from_options(person_segmenter_options)
 
-    @timeit
+    @profiler.timeit
     def _run_face_detector(self, frame_mp: Image, timestamp_ms: int | None = None, sort_largest: bool = True) -> tuple[ModelType, Detections]:
         face_detections = []
         if self.face_detection_enabled:
@@ -96,7 +97,7 @@ class InferenceRunner:
                 face_detections = sorted(face_detections, key=lambda e: (e[0][2] - e[0][0]) * (e[0][3] - e[0][1]), reverse=True)
         return ModelType.FACE_DETECTOR, face_detections
 
-    @timeit
+    @profiler.timeit
     def _run_face_landmarker(self, frame_mp: Image, timestamp_ms: int | None = None, sort_largest: bool = True) -> tuple[ModelType, Detections]:
         face_landmarks = []
         if self.face_landmarks_enabled:
@@ -116,7 +117,7 @@ class InferenceRunner:
                 face_landmarks = sorted(face_landmarks, key=lambda e: (e[0][2] - e[0][0]) * (e[0][3] - e[0][1]), reverse=True)
         return ModelType.FACE_LANDMARKER, face_landmarks
 
-    @timeit
+    @profiler.timeit
     def _run_hand_landmarker(self, frame_mp: Image, timestamp_ms: int | None = None, sort_largest: bool = True) -> tuple[ModelType, Detections]:
         hand_landmarks = []
         if self.hand_landmarks_enabled:
@@ -136,7 +137,7 @@ class InferenceRunner:
                 hand_landmarks = sorted(hand_landmarks, key=lambda e: (e[0][2] - e[0][0]) * (e[0][3] - e[0][1]), reverse=True)
         return ModelType.HAND_LANDMARKER, hand_landmarks
 
-    @timeit
+    @profiler.timeit
     def _run_person_segmenter(self, frame_mp: Image, timestamp_ms: int | None = None) -> tuple[ModelType, Masks]:
         class_mask = np.array([])
         conf_masks = []
@@ -151,7 +152,7 @@ class InferenceRunner:
             conf_masks = [conf_mask.numpy_view() for conf_mask in person_segmenter_results.confidence_masks]
         return ModelType.PERSON_SEGMENTER, (class_mask, conf_masks)
 
-    @timeit
+    @profiler.timeit
     def run_pipe(self, frame: cv2.typing.MatLike, timestamp_ms: int | None = None,
                  sort_largest: bool = True) -> list[tuple[ModelType, Detections | Masks]]:
         frame_mp = Image(image_format=ImageFormat.SRGB, data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -161,7 +162,7 @@ class InferenceRunner:
         person_segmenter_results = self._run_person_segmenter(frame_mp, timestamp_ms)
         return face_detector_results, face_landmarker_results, hand_landmarker_results, person_segmenter_results
 
-    @timeit
+    @profiler.timeit
     def calc_rois(self, inference_results: list[tuple[ModelType, Detections | Masks]],
                   roi_configs: tuple[tuple] = (FACE_FOREHEAD_CONFIG, HAND_PALM_CONFIG)) -> list[Location]:
         _, (_, face_landmarks), (_, hand_landmarks), _ = inference_results
