@@ -6,8 +6,8 @@ import matplotlib.colors
 import numpy as np
 
 from custom_profiler import timeit
-from data import Location, SignalCollection
-from inference_runner import Detections, Masks, ModelType
+from inference_runner import Detections, Masks, Location, ModelType
+from signal_processor import SignalCollection
 
 
 class Colors:

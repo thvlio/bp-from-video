@@ -11,12 +11,11 @@ from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarker, HandLa
 from mediapipe.tasks.python.vision.image_segmenter import ImageSegmenter, ImageSegmenterOptions
 
 from custom_profiler import timeit
-from data import Location
 
 type Detections = list[tuple[tuple[int, int, int, int], np.ndarray[int]]]
 type Masks = tuple[np.ndarray[int], list[np.ndarray[float]]]
 
-# type Location = tuple[int | float, int | float, int | float, int | float, int | float, int | float]
+type Location = tuple[int | float, int | float, int | float, int | float, int | float, int | float]
 
 
 class ModelType(Enum):

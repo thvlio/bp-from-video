@@ -4,10 +4,9 @@ import cv2
 import numpy as np
 
 from custom_profiler import printit
-from data import SignalCollection
 from drawer import Drawer
 from inference_runner import InferenceRunner
-from signal_processor import SignalProcessor
+from signal_processor import SignalCollection, SignalProcessor
 from video_reader import VideoReader
 
 
