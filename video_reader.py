@@ -3,7 +3,6 @@ import time
 import cv2
 import numpy as np
 
-# from custom_profiler import timeit
 from custom_profiler import profiler
 
 

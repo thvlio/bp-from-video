@@ -5,7 +5,6 @@ import matplotlib
 import matplotlib.colors
 import numpy as np
 
-# from custom_profiler import timeit
 from custom_profiler import profiler
 from inference_runner import Detections, Masks, Location, ModelType
 from signal_processor import SignalCollection

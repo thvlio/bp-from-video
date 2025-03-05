@@ -10,7 +10,6 @@ from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarker, FaceLa
 from mediapipe.tasks.python.vision.hand_landmarker import HandLandmarker, HandLandmarkerOptions
 from mediapipe.tasks.python.vision.image_segmenter import ImageSegmenter, ImageSegmenterOptions
 
-# from custom_profiler import timeit
 from custom_profiler import profiler
 
 type Detections = list[tuple[tuple[int, int, int, int], np.ndarray[int]]]

@@ -3,7 +3,6 @@ import math
 import cv2
 import numpy as np
 
-# from custom_profiler import printit
 from custom_profiler import profiler
 from drawer import Drawer
 from inference_runner import InferenceRunner
@@ -49,8 +48,6 @@ def main():
     timestamp_prev = np.nan
 
     cv2.namedWindow('frame')
-
-    print('-' * 80)
 
     while True:
 
