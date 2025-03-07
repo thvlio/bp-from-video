@@ -1,171 +1,61 @@
 import itertools
-from collections import deque
-from enum import Enum, auto
 
 import cv2
 import numpy as np
 import scipy.fft
 import scipy.interpolate
 import scipy.signal
-import scipy.stats
 
+from config import Config as c
 from custom_profiler import profiler
-from inference_runner import Location
-
-type SignalXtype = int | float
-type SignalYtype = int | float | Location
-
-
-class Signal:
-
-    def __init__(self,
-                 fill_value_x: SignalXtype | list[SignalXtype] = np.nan,
-                 fill_value_y: SignalYtype | list[SignalYtype] = np.nan,
-                 max_length: int | None = None) -> None:
-        self.x = deque([fill_value_x] * max_length if not isinstance(fill_value_x, (list, np.ndarray)) else fill_value_x, max_length)
-        self.y = deque([fill_value_y] * max_length if not isinstance(fill_value_y, (list, np.ndarray)) else fill_value_y, max_length)
-        self.max_length = max_length
-        self.nan = np.full_like(self.y[0], np.nan) if np.ndim(self.y) == 2 else np.nan
-        self.set_mask()
-        self.reset_range()
-
-    def add_sample(self, xp: SignalXtype, yp: SignalYtype) -> None:
-        self.x.append(xp)
-        self.y.append(yp)
-        self.set_mask()
-
-    def set_data(self, data_x: list[SignalXtype] | None = None, data_y: list[SignalYtype] | None = None) -> None:
-        self.x = deque(data_x, self.x.maxlen) if data_x is not None else self.x
-        self.y = deque(data_y, self.y.maxlen) if data_y is not None else self.y
-        self.set_mask()
-
-    def set_mask(self) -> np.ndarray[bool]:
-        self.v = np.isfinite(self.x)
-        self.w = np.isfinite(self.y).all(axis=1) if np.ndim(self.y) == 2 else np.isfinite(self.y)
-
-    def reset_range(self) -> None:
-        self.range_x = (np.nanmin(self.x), np.nanmax(self.x)) if self.v.sum() >= 2 else (np.nan, np.nan)
-        self.range_y = (np.nanmin(self.y), np.nanmax(self.y)) if self.w.sum() >= 2 else (self.nan, self.nan)
-
-    def set_range(self, range_x: tuple[SignalXtype, SignalXtype] | None = None, range_y: tuple[SignalYtype, SignalYtype] | None = None) -> None:
-        self.range_x = range_x if range_x is not None else self.range_x
-        self.range_y = range_y if range_y is not None else self.range_y
-
-    def get_fs(self, only_valid: bool = False) -> SignalXtype:
-        x = np.array(self.x)
-        u = self.w if only_valid else self.v
-        return 1 / np.nanmean(np.diff(x[u])) if u.sum() >= 2 else np.nan
-
-    def get_mean(self, as_int: bool = False) -> SignalYtype:
-        y = np.array(self.y)
-        y_mean = np.squeeze(np.nanmean(y, axis=0)) if self.w.any() else y[-1]
-        return y_mean.round().astype(int) if as_int and self.w.any() else y_mean
-
-    def get_peak(self, min_x: SignalXtype | None = None, max_x: SignalXtype | None = None) -> tuple[SignalXtype, SignalYtype]:
-        x, y = np.array(self.x), np.array(self.y)
-        min_x = min_x if min_x is not None else self.range_x[0]
-        max_x = max_x if max_x is not None else self.range_x[1]
-        u = (min_x <= x) & (x <= max_x) & self.w
-        return (x[u][np.argmax(y[u])], np.max(y[u])) if u.sum() >= 2 else ((np.nan,)*y.shape[-1], np.nan) if np.ndim(y) == 2 else (np.nan, np.nan)
-
-
-class SignalCollection:
-
-    def __init__(self,
-                 num_signals: int | None = None,
-                 fill_value_x: SignalXtype | list[SignalXtype] = np.nan,
-                 fill_value_y: SignalYtype | list[SignalYtype] = np.nan,
-                 max_length: int | None = None,
-                 signals: list[Signal] | None = None) -> None:
-        self.num_signals = num_signals if signals is None else len(signals)
-        self.signals = [Signal(fill_value_x, fill_value_y, max_length) for _ in range(self.num_signals)] if signals is None else signals
-        self.max_length = max_length if signals is None else max(s.max_length for s in signals)
-        self.nan = self.signals[0].nan
-        self.set_ranges()
-
-    def __iter__(self):
-        return (s for s in self.signals)
-
-    def add_samples(self, xps: SignalXtype | list[SignalXtype], yps: list[SignalYtype]) -> None:
-        xps = xps if isinstance(xps, (list, tuple)) else [xps] * self.num_signals
-        for signal, xp, yp in zip(self.signals, xps, yps):
-            signal.add_sample(xp, yp)
-
-    def set_ranges(self, range_x: tuple[SignalXtype, SignalXtype] | None = None, range_y: tuple[SignalYtype, SignalYtype] | None = None) -> None:
-        for signal in self.signals:
-            signal.set_range(range_x, range_y)
-        lower_xs, upper_xs, lower_ys, upper_ys = zip(*((*s.range_x, *s.range_y) for s in self.signals))
-        self.range_x = (np.nanmin(lower_xs), np.nanmax(upper_xs)) if np.isfinite([lower_xs, upper_xs]).any(axis=1).all() else (np.nan, np.nan)
-        self.range_y = (np.nanmin(lower_ys), np.nanmax(upper_ys)) if np.isfinite([lower_ys, upper_ys]).any(axis=1).all() else (self.nan, self.nan)
-
-    def get_means(self, as_int: bool = False) -> list[SignalYtype]:
-        return [s.get_mean(as_int) for s in self.signals]
-
-    def get_peaks(self, min_x: SignalXtype | None = None, max_x: SignalXtype | None = None) -> list[tuple[SignalXtype, SignalYtype]]:
-        return [s.get_peak(min_x, max_x) for s in self.signals]
-
-
-class SignalColorChannel(Enum):
-    GREEN = auto()
-    CHROM_GREEN = auto()
-
-
-class SignalProcessingMethod(Enum):
-    DIFF_1 = auto()
-    DIFF_2 = auto()
-    INTERP_LINEAR = auto()
-    INTERP_BSPLINE = auto()
-    DETREND_CONST = auto()
-    DETREND_LINEAR = auto()
-    FILTER_BUTTER = auto()
-    FILTER_FIR = auto()
-
-
-class SignalSpectrumTransform(Enum):
-    DFT_RFFT = auto()
-    PGRAM_WELCH = auto()
-    PGRAM_LS = auto()
+from signal_data import Signal, SignalCollection
 
 
 class SignalProcessor:
 
-    def __init__(self) -> None:
-
-        self.color_channel = SignalColorChannel.GREEN
-        self.processing_methods = [
-            # SignalProcessingMethod.DIFF_1,
-            SignalProcessingMethod.INTERP_LINEAR,
-            SignalProcessingMethod.FILTER_BUTTER
-        ]
-        self.spectrum_transform = SignalSpectrumTransform.PGRAM_LS
-
-        self.min_freq = 0.8
-        self.max_freq = 4.0
-        self.min_mag = 0.0
-        self.max_mag = 1.0
-
-        self.butter_order = 16
-        self.fir_taps = 127
-        self.fir_df = 0.3
-
-        self.calc_correlation = True
-        self.min_lag = -0.5
-        self.max_lag = 0.5
-        self.min_corr = -1.0
-        self.max_corr = 1.0
+    def __init__(self,
+                 color_channel: c.SignalColorChannel = c.SIGNAL_COLOR_CHANNEL,
+                 processing_methods: list[c.SignalProcessingMethod] = c.SIGNAL_PROCESSING_METHODS,
+                 spectrum_transform: c.SignalSpectrumTransform = c.SIGNAL_SPECTRUM_TRANSFORM,
+                 *,
+                 butter_order: int = c.FILTER_BUTTER_ORDER,
+                 fir_taps: int = c.FILTER_FIR_TAPS,
+                 fir_df: float = c.FILTER_FIR_DF,
+                 min_freq: float = c.FILTER_MIN_FREQ,
+                 max_freq: float = c.FILTER_MAX_FREQ,
+                 min_mag: float = c.SPECTRUM_MIN_MAG,
+                 max_mag: float = c.SPECTRUM_MAX_MAG,
+                 min_lag: float = c.SIGNALS_MIN_LAG,
+                 max_lag: float = c.SIGNALS_MAX_LAG,
+                 min_corr: float = c.SIGNALS_MIN_CORR,
+                 max_corr: float = c.SIGNALS_MAX_CORR) -> None:
+        self.color_channel = color_channel
+        self.processing_methods = processing_methods
+        self.spectrum_transform = spectrum_transform
+        self.butter_order = butter_order
+        self.fir_taps = fir_taps
+        self.fir_df = fir_df
+        self.min_freq = min_freq
+        self.max_freq = max_freq
+        self.min_mag = min_mag
+        self.max_mag = max_mag
+        self.min_lag = min_lag
+        self.max_lag = max_lag
+        self.min_corr = min_corr
+        self.max_corr = max_corr
 
     @profiler.timeit
     def make_filter(self, signal_processing_method, sampling_freq) -> np.ndarray:
-        if signal_processing_method == SignalProcessingMethod.FILTER_BUTTER:
+        if signal_processing_method == c.SignalProcessingMethod.FILTER_BUTTER:
             bands = [self.min_freq,
                      self.max_freq]
             filt = scipy.signal.butter(self.butter_order, bands, btype='bandpass', output='sos', fs=sampling_freq)
-        elif signal_processing_method == SignalProcessingMethod.FILTER_FIR:
+        elif signal_processing_method == c.SignalProcessingMethod.FILTER_FIR:
             bands = [0,
-                     self.min_freq - self.fir_df,
+                     max(self.min_freq - self.fir_df, self.fir_df),
                      self.min_freq,
                      self.max_freq,
-                     self.max_freq + self.fir_df,
+                     min(self.max_freq + self.fir_df, sampling_freq / 2 - self.fir_df),
                      sampling_freq / 2]
             filt = scipy.signal.firls(self.fir_taps, bands, [0, 0, 1, 1, 0, 0], fs=sampling_freq)
         else:
@@ -173,13 +63,13 @@ class SignalProcessor:
         return filt
 
     @profiler.timeit
-    def sample_signal(self, frame: cv2.typing.MatLike, roi: Location) -> SignalYtype:
+    def sample_signal(self, frame: cv2.typing.MatLike, roi: c.Location) -> c.SignalYs:
         if not np.isnan(roi).any():
             _, _, x_0, y_0, x_1, y_1 = roi
             roi_bgr = frame[y_0:y_1, x_0:x_1, :]
-            if self.color_channel == SignalColorChannel.GREEN:
+            if self.color_channel == c.SignalColorChannel.GREEN:
                 values = roi_bgr[..., 1]
-            elif self.color_channel == SignalColorChannel.CHROM_GREEN:
+            elif self.color_channel == c.SignalColorChannel.CHROM_GREEN:
                 values = roi_bgr[..., 1] / 2 - roi_bgr[..., 0] / 4 - roi_bgr[..., 2] / 4 + 0.5
             else:
                 raise NotImplementedError
@@ -189,7 +79,7 @@ class SignalProcessor:
         return value
 
     @profiler.timeit
-    def sample_signals(self, frame: cv2.typing.MatLike, rois: list[Location]) -> list[SignalYtype]:
+    def sample_signals(self, frame: cv2.typing.MatLike, rois: list[c.Location]) -> list[c.SignalYs]:
         return [self.sample_signal(frame, r) for r in rois]
 
     @profiler.timeit
@@ -199,36 +89,36 @@ class SignalProcessor:
         fs = signal_raw.get_fs()
         if valid.sum() >= 2 and np.isfinite(fs):
             for method in self.processing_methods:
-                if method == SignalProcessingMethod.DIFF_1:
+                if method == c.SignalProcessingMethod.DIFF_1:
                     y[valid] = np.diff(y[valid], n=1, axis=0, prepend=y[valid][0])
-                elif method == SignalProcessingMethod.DIFF_2:
+                elif method == c.SignalProcessingMethod.DIFF_2:
                     y[valid] = np.diff(y[valid], n=2, axis=0, prepend=y[valid][:2])
-                elif method == SignalProcessingMethod.INTERP_LINEAR:
+                elif method == c.SignalProcessingMethod.INTERP_LINEAR:
                     x_interp_block, ts = np.linspace(x[block][0], x[block][-1], block.sum(), retstep=True)
                     y_interp_block = np.interp(x_interp_block, x[valid], y[valid])
                     x[block], y[block] = x_interp_block, y_interp_block
                     valid = block
                     fs = 1 / ts
-                elif method == SignalProcessingMethod.INTERP_BSPLINE:
+                elif method == c.SignalProcessingMethod.INTERP_CUBIC:
                     cs = scipy.interpolate.CubicSpline(x[valid], y[valid], axis=0)
                     x_interp_block, ts = np.linspace(x[block][0], x[block][-1], block.sum(), retstep=True)
                     y_interp_block = cs(x_interp_block)
                     x[block], y[block] = x_interp_block, y_interp_block
                     valid = block
                     fs = 1 / ts
-                elif method == SignalProcessingMethod.DETREND_CONST:
+                elif method == c.SignalProcessingMethod.DETREND_CONST:
                     y_detrended_valid = scipy.signal.detrend(y[valid], type='constant')
                     y[valid] = y_detrended_valid
-                elif method == SignalProcessingMethod.DETREND_LINEAR:
+                elif method == c.SignalProcessingMethod.DETREND_LINEAR:
                     y_detrended_valid = scipy.signal.detrend(y[valid], type='linear')
                     y[valid] = y_detrended_valid
-                elif method == SignalProcessingMethod.FILTER_BUTTER:
+                elif method == c.SignalProcessingMethod.FILTER_BUTTER:
                     butter = self.make_filter(method, fs)
                     default_padlen = 3 * (2 * len(butter) + 1 - min((butter[:, 2] == 0).sum(), (butter[:, 5] == 0).sum()))
                     padlen = valid.sum() - 1 if valid.sum() <= default_padlen else default_padlen
                     y_filtered_valid = scipy.signal.sosfiltfilt(butter, y[valid], padlen=padlen)
                     y[valid] = y_filtered_valid
-                elif method == SignalProcessingMethod.FILTER_FIR:
+                elif method == c.SignalProcessingMethod.FILTER_FIR:
                     fir = self.make_filter(method, fs)
                     default_padlen = 3 * len(fir)
                     padlen = valid.sum() - 1 if valid.sum() <= default_padlen else default_padlen
@@ -250,16 +140,16 @@ class SignalProcessor:
         valid = signal_proc.w
         fs = signal_proc.get_fs()
         if valid.sum() >= 2 and np.isfinite(fs):
-            if self.spectrum_transform == SignalSpectrumTransform.DFT_RFFT:
+            if self.spectrum_transform == c.SignalSpectrumTransform.DFT_RFFT:
                 num_samples = len(x[valid])
                 sampling_period = 1 / fs
                 freqs = scipy.fft.rfftfreq(num_samples, sampling_period)
                 spectrum = scipy.fft.rfft(y[valid], n=num_samples) # norm='ortho'
                 mags = 2 * np.abs(spectrum) / num_samples
-            elif self.spectrum_transform == SignalSpectrumTransform.PGRAM_WELCH:
+            elif self.spectrum_transform == c.SignalSpectrumTransform.PGRAM_WELCH:
                 freqs, pgram = scipy.signal.welch(y[valid], fs)
                 mags = pgram
-            elif self.spectrum_transform == SignalSpectrumTransform.PGRAM_LS:
+            elif self.spectrum_transform == c.SignalSpectrumTransform.PGRAM_LS:
                 num_samples = len(x[valid])
                 freqs = np.linspace(self.min_freq, self.max_freq, num_samples)
                 pgram = scipy.signal.lombscargle(x[valid], y[valid], freqs=freqs*2*np.pi, floating_mean=True, normalize=True)

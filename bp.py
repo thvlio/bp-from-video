@@ -85,7 +85,7 @@ def main():
         mean_ptts = signals_ptt.get_means(as_int=True)
         drawer.write_info(auto_adjust, curr_fs, mean_fs, mean_bpms, mean_ptts)
 
-        drawer.draw_signals(signals_proc, signals_spectrum, signals_corr)
+        drawer.plot_signals([signals_proc, signals_spectrum, signals_corr])
 
         cv2.moveWindow('frame', 1080 + 1920 // 2 - frame.shape[1] // 2, 0)
         cv2.imshow('frame', drawer.get_frame())

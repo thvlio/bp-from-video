@@ -3,25 +3,24 @@ import time
 import cv2
 import numpy as np
 
+from config import Config as c
 from custom_profiler import profiler
 
 
 class VideoReader:
 
-    def __init__(self, path: int | str, target_res: tuple[int, int] | None = None) -> None:
+    def __init__(self,
+                 path: int | str,
+                 target_res: tuple[int, int] | None = None,
+                 *,
+                 auto_adjust_time: int | float = c.CAP_AUTO_ADJUST_TIME,
+                 optimal_focus: int | float = c.CAP_OPTIMAL_FOCUS,
+                 adjustable_props: int | float = c.CAP_ADJUSTABLE_PROPS) -> None:
         self.path = path
         self.target_res = target_res
-        self.auto_adjust_time = 5
-        self.optimal_focus = 65.0 # 50.0
-        self.props = [
-            (cv2.CAP_PROP_FOCUS, 5, 'cv2.CAP_PROP_FOCUS'), # 50 [0, 250]
-            (cv2.CAP_PROP_WB_TEMPERATURE, 100, 'cv2.CAP_PROP_WB_TEMPERATURE'), # 4783 [2000, 6500]
-            (cv2.CAP_PROP_BRIGHTNESS, 4, 'cv2.CAP_PROP_BRIGHTNESS'), # 128 [0, 255]
-            (cv2.CAP_PROP_CONTRAST, 4, 'cv2.CAP_PROP_CONTRAST'), # 128 [0, 255]
-            (cv2.CAP_PROP_SATURATION, 4, 'cv2.CAP_PROP_SATURATION'), # 128 [0, 255]
-            (cv2.CAP_PROP_EXPOSURE, 32, 'cv2.CAP_PROP_EXPOSURE'), # 128 [0, 255]
-            (cv2.CAP_PROP_GAIN, 4, 'cv2.CAP_PROP_GAIN'), # 31 []
-        ]
+        self.auto_adjust_time = auto_adjust_time
+        self.optimal_focus = optimal_focus
+        self.adjustable_props = adjustable_props
         self.prop_idx = 0
         self.cap = cv2.VideoCapture(path)
         read, _ = self.cap.read()
@@ -67,17 +66,17 @@ class VideoReader:
         return read, frame, timestamp
 
     def prop_control(self, key: int) -> None:
-        prop_id, inc_value, prop_name = self.props[self.prop_idx]
+        prop_id, inc_value, prop_name = self.adjustable_props[self.prop_idx]
         if ord('0') <= key <= ord('9'):
             if key == ord('8'):
                 self.cap.set(prop_id, self.cap.get(prop_id) + inc_value)
             elif key == ord('2'):
                 self.cap.set(prop_id, self.cap.get(prop_id) - inc_value)
             elif key == ord('4'):
-                self.prop_idx = (self.prop_idx - 1) % len(self.props)
+                self.prop_idx = (self.prop_idx - 1) % len(self.adjustable_props)
             elif key == ord('6'):
-                self.prop_idx = (self.prop_idx + 1) % len(self.props)
+                self.prop_idx = (self.prop_idx + 1) % len(self.adjustable_props)
             elif key == ord('0'):
                 self.cap.set(cv2.CAP_PROP_FOCUS, self.optimal_focus)
-            prop_id, inc_value, prop_name = self.props[self.prop_idx]
+            prop_id, inc_value, prop_name = self.adjustable_props[self.prop_idx]
             print(f'{prop_name}: {self.cap.get(prop_id)}')
