@@ -1,20 +1,18 @@
 import itertools
 
 import cv2
-import matplotlib
-import matplotlib.colors
 import numpy as np
 
 from config import Config as c
 from custom_profiler import profiler
-from signal_processor import Signal, SignalCollection
+from signal_data import Signal, SignalCollection
 
 
 class Drawer:
 
     def __init__(self,
-                 model_colormap: dict[c.ModelType, c.Colors] = c.DRAW_MODEL_COLORMAP,
-                 signal_colors: list[list[int]] = c.GRAPH_SIGNAL_COLORS,
+                 model_colormap: dict[c.ModelType, c.Colors] | None = None,
+                 signal_colormap: dict[int, np.ndarray[np.uint8]] | None = None,
                  *,
                  line_thickness: float = c.DRAW_LINE_THICKNESS,
                  line_type: int = c.DRAW_LINE_TYPE,
@@ -23,8 +21,8 @@ class Drawer:
                  window_size: tuple[int, int] = c.WINDOW_SIZE,
                  window_margins: tuple[int, int] = c.WINDOW_MARGINS,
                  graph_default_range: tuple[float, float] = c.GRAPH_DEFAULT_RANGE) -> None:
-        self.model_colormap = model_colormap
-        self.signal_colors = signal_colors
+        self.model_colormap = model_colormap if model_colormap is not None else c.DRAW_MODEL_COLORMAP
+        self.signal_colormap = signal_colormap if signal_colormap is not None else c.GRAPH_SIGNAL_COLORMAP
         self.line_thickness = line_thickness
         self.line_type = line_type
         self.point_radius = point_radius
@@ -34,72 +32,117 @@ class Drawer:
         self.graph_height = (window_height - (num_plots + 1) * window_margin_y) // num_plots
         self.graph_origins = [(window_margin_x, i * self.graph_height + (i + 1) * window_margin_y) for i in range(num_plots)]
         self.graph_default_range = graph_default_range
-
-        default_colors = matplotlib.colors.to_rgba_array([f'C{i}' for i in range(10)])
-        self.signal_colors = [clr.tolist() for clr in (default_colors[:, :-1] * 255).round().astype(np.uint8)]
-
         self.plot = np.full((window_height, window_width, 3), 255, dtype=np.uint8)
-        self.original = None
-        self.drawn = None
+        cv2.namedWindow('frame')
         cv2.namedWindow('plot')
 
-    def set_frame(self, frame: cv2.typing.MatLike) -> None:
-        self.original = frame.copy()
-        self.drawn = frame.copy()
-
-    def get_frame(self, alpha: float = 0.75) -> cv2.typing.MatLike:
-        return cv2.addWeighted(self.drawn, alpha, self.original, 1.0-alpha, 0.0)
+    def wait_key(self, delay: int = 1) -> int:
+        key = cv2.waitKey(delay)
+        if key == ord('q'):
+            raise KeyboardInterrupt
+        return key
 
     @profiler.timeit
-    def draw_results(self, results: list[c.Detections | c.Masks]) -> None:
-        for model_type, result in results:
+    def draw_inferences(self, frame: cv2.typing.MatLike, model_results: list[c.Detections | c.Masks]) -> cv2.typing.MatLike:
+        drawn = frame.copy()
+        for model_type, model_result in model_results:
             if model_type in [c.ModelType.FACE_DETECTOR, c.ModelType.FACE_LANDMARKER, c.ModelType.HAND_LANDMARKER]:
-                if len(result) == 0:
+                if len(model_result) == 0:
                     continue
                 color = self.model_colormap[model_type]
-                for bbox, points in result:
+                for bbox, points in model_result:
                     x_0, y_0, x_1, y_1 = bbox
-                    self.drawn = cv2.rectangle(self.drawn, (x_0, y_0), (x_1, y_1), color, self.line_thickness, self.line_type)
+                    drawn = cv2.rectangle(drawn, (x_0, y_0), (x_1, y_1), color, self.line_thickness, self.line_type)
                     for x, y in points:
-                        self.drawn = cv2.circle(self.drawn, (x, y), self.point_radius, color, self.line_thickness, self.line_type)
+                        drawn = cv2.circle(drawn, (x, y), self.point_radius, color, self.line_thickness, self.line_type)
             elif model_type is c.ModelType.PERSON_SEGMENTER:
-                class_mask, conf_masks = result
+                class_mask, conf_masks = model_result
                 if class_mask.size == 0:
                     continue
-                self.drawn = (self.drawn * np.expand_dims(conf_masks[3], 2)).round().astype(np.uint8)
+                drawn = (drawn * np.expand_dims(conf_masks[3], 2)).round().astype(np.uint8)
             else:
                 raise NotImplementedError
+        return drawn
 
     @profiler.timeit
-    def draw_rois(self, rois: list[c.Location]) -> None:
-        for (x, y, x_0, y_0, x_1, y_1), color in zip(rois, self.signal_colors):
+    def draw_rois(self, frame: cv2.typing.MatLike, rois: list[c.Location]) -> cv2.typing.MatLike:
+        drawn = frame.copy()
+        for s, (x, y, x_0, y_0, x_1, y_1) in enumerate(rois):
             if not np.isnan([x, y, x_0, x_1, y_0, y_1]).any():
-                self.drawn = cv2.rectangle(self.drawn, (x_0, y_0), (x_1, y_1), color, self.line_thickness, self.line_type)
-                self.drawn = cv2.drawMarker(self.drawn, (x, y), color, cv2.MARKER_CROSS, self.line_thickness*5, self.line_thickness, self.line_type)
+                color = self.signal_colormap[s]
+                drawn = cv2.rectangle(drawn, (x_0, y_0), (x_1, y_1), color, self.line_thickness, self.line_type)
+                drawn = cv2.drawMarker(drawn, (x, y), color, cv2.MARKER_CROSS, self.line_thickness*5, self.line_thickness, self.line_type)
+        return drawn
 
-    def write_text(self, text: str, color: tuple[int, int, int] = c.Colors.GRAY, font_size: float | None = None) -> None:
+    def write_text(self,
+                   frame: cv2.typing.MatLike,
+                   text: str,
+                   color: tuple[int, int, int] = c.Colors.GRAY,
+                   font_size: float | None = None) -> cv2.typing.MatLike:
         text_x = 15
         text_y = (self.curr_text_index + 1) * 30
-        font_size = self.drawn.shape[1] / 1024 if font_size is None else font_size
-        self.drawn = cv2.putText(self.drawn, text, (text_x, text_y), cv2.FONT_HERSHEY_COMPLEX, font_size, color, self.line_thickness, self.line_type)
+        font_size = font_size if font_size is not None else frame.shape[1] / 1024
+        written = cv2.putText(frame, text, (text_x, text_y), cv2.FONT_HERSHEY_COMPLEX, font_size, color, self.line_thickness, self.line_type)
         self.curr_text_index += 1
+        return written
+
+    # TODO: pass the classes to write info too
 
     @profiler.timeit
-    def write_info(self, auto_adjust: bool, curr_fs: float, mean_fs: float, mean_bpms: list[float], mean_ptts: list[float]) -> None:
+    def write_info(self,
+                   frame: cv2.typing.MatLike,
+                   # *,
+                   curr_fs: float = np.nan,
+                   mean_fs: float = np.nan,
+                   mean_bpms: list[float] | None = None,
+                   mean_ptts: list[float] | None = None,
+                   auto_adjust: bool | None = None) -> cv2.typing.MatLike:
+        written = frame.copy()
+        mean_bpms = mean_bpms if mean_bpms is not None else []
+        mean_ptts = mean_ptts if mean_ptts is not None else []
         self.curr_text_index = 0
-        self.write_text(f'curr_fs: {curr_fs:.2f} Hz', c.Colors.BLUE)
-        self.write_text(f'mean_fs: {mean_fs:.2f} Hz', c.Colors.BLUE_AZURE)
+        written = self.write_text(written, f'curr_fs: {curr_fs:.2f} Hz', c.Colors.BLUE)
+        written = self.write_text(written, f'mean_fs: {mean_fs:.2f} Hz', c.Colors.BLUE_AZURE)
         self.curr_text_index += 1
         for s, mean_bpm in enumerate(mean_bpms):
             mean_bpm_text = f'mean_bpm_{s}: {mean_bpm} bpm' if not np.isnan(mean_bpm) else 'NaN'
-            self.write_text(mean_bpm_text, c.Colors.RED)
+            written = self.write_text(written, mean_bpm_text, c.Colors.RED)
         self.curr_text_index += 1
         for s, mean_ptt in enumerate(mean_ptts):
             mean_ptt_text = f'mean_ptt_{s}: {mean_ptt} ms' if not np.isnan(mean_ptt) else 'NaN'
-            self.write_text(mean_ptt_text, c.Colors.GREEN)
+            written = self.write_text(written, mean_ptt_text, c.Colors.GREEN)
         self.curr_text_index += 1
         if auto_adjust:
-            self.write_text('adjusting exposure & focus', c.Colors.RED)
+            written = self.write_text(written, 'adjusting exposure & focus', c.Colors.RED)
+        return written
+
+    # TODO: use all result classes here
+
+    @profiler.timeit
+    def draw_results(self,
+                     frame: cv2.typing.MatLike,
+                     model_results: list[c.Detections | c.Masks],
+                     signal_results: tuple[SignalCollection, ...],
+                     # *,
+                     signals_roi: SignalCollection,
+                     signals_bpm: SignalCollection,
+                     signals_ptt: SignalCollection,
+                     timestamp_delta: int | float = np.nan,
+                     auto_adjust: bool | None = None,
+                     alpha: float = 0.75) -> None:
+        signals_roi, _, _, _, _,
+        drawn = frame.copy()
+        drawn = self.draw_inferences(drawn, model_results)
+        rois = signals_roi.get_means(as_int=True)
+        drawn = self.draw_rois(drawn, rois)
+        curr_fs = 1 / timestamp_delta
+        mean_fs = signals_bpm.signals[0].get_fs()
+        mean_bpms = signals_bpm.get_means(as_int=True)
+        mean_ptts = signals_ptt.get_means(as_int=True)
+        drawn = self.write_info(drawn, curr_fs, mean_fs, mean_bpms, mean_ptts, auto_adjust)
+        blended = cv2.addWeighted(drawn, alpha, frame, 1.0-alpha, 0.0)
+        cv2.moveWindow('frame', 1080 + 1920 // 2 - frame.shape[1] // 2, 0)
+        cv2.imshow('frame', blended)
 
     @profiler.timeit
     def draw_graph(self,
@@ -163,16 +206,22 @@ class Drawer:
                 data_g = np.vstack(list(group)).astype(int)
                 self.plot = cv2.polylines(self.plot, [data_g], False, color, lineType=self.line_type)
 
+    # TODO: use the signal processor results class
+    #       add to config flags to plot each signal
+    #       or organize it myself when calling plot signals from bp.py and pbp.py
+
     @profiler.timeit
     def plot_signals(self, signal_collections: list[SignalCollection]) -> None:
         self.plot = np.full_like(self.plot, 255)
         for signal_collection, graph_origin in zip(signal_collections, self.graph_origins):
-            signal_collection.set_ranges()
             graph_range_x = signal_collection.range_x if np.isfinite(signal_collection.range_x).all() else self.graph_default_range
             graph_range_y = signal_collection.range_y if np.isfinite(signal_collection.range_y).all() else self.graph_default_range
             graph_range = (graph_range_x, graph_range_y)
             self.draw_graph(graph_origin, graph_range)
-            for signal, color in zip(signal_collection, self.signal_colors):
-                self.draw_signal(signal, graph_origin, graph_range, color)
+            for s, signal in enumerate(signal_collection):
+                self.draw_signal(signal, graph_origin, graph_range, self.signal_colormap[s])
         cv2.moveWindow('plot', 1080, 0)
         cv2.imshow('plot', self.plot)
+
+    def cleanup(self) -> None:
+        cv2.destroyAllWindows()
