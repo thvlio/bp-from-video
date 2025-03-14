@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-from enum import Enum, auto
+import enum
 
 import cv2
 import matplotlib.colors
@@ -7,22 +6,30 @@ import numpy as np
 from mediapipe.tasks.python.vision.core.vision_task_running_mode import VisionTaskRunningMode
 
 
-@dataclass
 class Config:
+
+    # TODO: split into types and constants (think of filenames)
+
+    # TODO: stop using class
 
     # =============== #
     # custom_profiler #
     # =============== #
 
-    PROFILER_ACTIVATE = True
+    PROFILER_ENABLED = True
 
     # ============ #
     # video_reader #
     # ============ #
 
+    class CaptureError(RuntimeError):
+        pass
+
     CAP_AUTO_ADJUST_TIME = 5
 
-    CAP_ADJUSTABLE_PROPS = (
+    CAP_OPTIMAL_FOCUS = 65.0
+
+    CAP_ADJUSTABLE_PROPS = [
         (cv2.CAP_PROP_FOCUS, 5, 'cv2.CAP_PROP_FOCUS'), # 50 [0, 250]
         (cv2.CAP_PROP_WB_TEMPERATURE, 100, 'cv2.CAP_PROP_WB_TEMPERATURE'), # 4783 [2000, 6500]
         (cv2.CAP_PROP_BRIGHTNESS, 4, 'cv2.CAP_PROP_BRIGHTNESS'), # 128 [0, 255]
@@ -30,24 +37,24 @@ class Config:
         (cv2.CAP_PROP_SATURATION, 4, 'cv2.CAP_PROP_SATURATION'), # 128 [0, 255]
         (cv2.CAP_PROP_EXPOSURE, 32, 'cv2.CAP_PROP_EXPOSURE'), # 128 [0, 255]
         (cv2.CAP_PROP_GAIN, 4, 'cv2.CAP_PROP_GAIN'), # 31 []
-    )
-
-    CAP_OPTIMAL_FOCUS = 65.0
+    ]
 
     # ================ #
     # inference_runner #
     # ================ #
 
-    class ModelType(Enum):
-        FACE_DETECTOR = auto()
-        FACE_LANDMARKER = auto()
-        HAND_LANDMARKER = auto()
-        PERSON_SEGMENTER = auto()
+    class ModelType(enum.Enum):
+        FACE_DETECTOR = enum.auto()
+        FACE_LANDMARKER = enum.auto()
+        HAND_LANDMARKER = enum.auto()
+        PERSON_SEGMENTER = enum.auto()
 
     type Detections = tuple[ModelType, list[tuple[tuple[int, int, int, int], np.ndarray[int]]]]
     type Masks = tuple[ModelType, tuple[np.ndarray[int], list[np.ndarray[float]]]]
 
-    type Location = tuple[int, int, int, int, int, int] | tuple[float, float, float, float, float, float]
+    type Location = tuple[int, int, int, int, int, int] | tuple[float, float, float, float, float, float] | np.ndarray[float]
+
+    type ROIConfig = list[tuple[ModelType, list[int], tuple[float, float, float, float]]]
 
     FACE_DETECTION_ENABLED = False
     FACE_LANDMARKS_ENABLED = True
@@ -70,7 +77,7 @@ class Config:
     HAND_WRIST_CONFIG = (ModelType.HAND_LANDMARKER, [HAND_LANDMARKS_WRIST_INDEX], (-0.10, -0.10, 0.10, 0.10))
     HAND_PALM_CONFIG = (ModelType.HAND_LANDMARKER, [HAND_LANDMARKS_WRIST_INDEX, HAND_LANDMARKS_MIDDLE_INDEX], (-0.10, -0.10, 0.10, 0.10))
 
-    SELECTED_ROI_CONFIGS = (FACE_FOREHEAD_CONFIG, HAND_PALM_CONFIG)
+    SELECTED_ROI_CONFIGS = [FACE_FOREHEAD_CONFIG, HAND_PALM_CONFIG]
 
     # =========== #
     # signal_data #
@@ -83,34 +90,35 @@ class Config:
     # signal_processing #
     # ================= #
 
-    class SignalColorChannel(Enum):
-        GREEN = auto()
-        CHROM_GREEN = auto()
+    class SignalColorChannel(enum.Enum):
+        GREEN = enum.auto()
+        CHROM_GREEN = enum.auto()
 
-    class SignalProcessingMethod(Enum):
-        DIFF_1 = auto()
-        DIFF_2 = auto()
-        INTERP_LINEAR = auto()
-        INTERP_CUBIC = auto()
-        DETREND_CONST = auto()
-        DETREND_LINEAR = auto()
-        FILTER_BUTTER = auto()
-        FILTER_FIR = auto()
+    class SignalProcessingMethod(enum.Enum):
+        DIFF_1 = enum.auto()
+        DIFF_2 = enum.auto()
+        INTERP_LINEAR = enum.auto()
+        INTERP_CUBIC = enum.auto()
+        DETREND_CONST = enum.auto()
+        DETREND_LINEAR = enum.auto()
+        FILTER_BUTTER = enum.auto()
+        FILTER_FIR = enum.auto()
 
-    class SignalSpectrumTransform(Enum):
-        DFT_RFFT = auto()
-        PGRAM_WELCH = auto()
-        PGRAM_LS = auto()
+    class SignalSpectrumTransform(enum.Enum):
+        DFT_RFFT = enum.auto()
+        PGRAM_WELCH = enum.auto()
+        PGRAM_LS = enum.auto()
 
     SIGNAL_COLOR_CHANNEL = SignalColorChannel.GREEN
-    SIGNAL_PROCESSING_METHODS = (
+    SIGNAL_PROCESSING_METHODS = [
         # SignalProcessingMethod.DIFF_1,
-        SignalProcessingMethod.INTERP_CUBIC,
-        SignalProcessingMethod.FILTER_FIR
-    )
+        # SignalProcessingMethod.INTERP_CUBIC,
+        SignalProcessingMethod.FILTER_BUTTER,
+    ]
     SIGNAL_SPECTRUM_TRANSFORM = SignalSpectrumTransform.PGRAM_LS
 
     FILTER_BUTTER_ORDER = 16
+    FILTER_BUTTER_MIN_BW = 0.1
     FILTER_FIR_TAPS = 127
     FILTER_FIR_DF = 0.3
 
@@ -151,7 +159,7 @@ class Config:
     }
 
     MATPLOTLIB_DEFAULT_COLORS = matplotlib.colors.to_rgba_array([f'C{i}' for i in range(len(SELECTED_ROI_CONFIGS))])
-    GRAPH_SIGNAL_COLORS = tuple((MATPLOTLIB_DEFAULT_COLORS[:, :-1] * 255).round().astype(np.uint8).tolist())
+    GRAPH_SIGNAL_COLORMAP = dict(enumerate((MATPLOTLIB_DEFAULT_COLORS[:, :-1] * 255).round().astype(np.uint8).tolist()))
 
     DRAW_LINE_THICKNESS = 1
     DRAW_LINE_TYPE = cv2.LINE_AA
@@ -162,3 +170,11 @@ class Config:
     WINDOW_MARGINS = (40, 40)
 
     GRAPH_DEFAULT_RANGE = (-1.0, 1.0)
+
+    # == #
+    # bp #
+    # == #
+
+    ROI_MAX_SAMPLES = 1
+    SIGNAL_MAX_SAMPLES = 200
+    PEAK_MAX_SAMPLES = 50
