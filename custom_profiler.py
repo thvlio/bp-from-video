@@ -6,38 +6,40 @@ import pstats
 from config import Config as c
 
 
-class Profiler:
+class CustomProfiler(cProfile.Profile):
 
-    def __init__(self, activate: bool = c.PROFILER_ACTIVATE):
-        self.activate = activate
-        self.profiler = cProfile.Profile(subcalls=False, builtins=False)
+    # TODO: change to Profiler and file to profiler.py
+
+    def __init__(self, enabled: bool = c.PROFILER_ENABLED):
+        self.enabled = enabled
         self.funcs = []
+        super().__init__(subcalls=False, builtins=False)
 
     def timeit(self, func):
         @functools.wraps(func)
         def run_func(*args, **kwargs):
-            if not self.activate:
+            if not self.enabled:
                 return func(*args, **kwargs)
             try:
-                self.profiler.enable()
+                self.enable()
             except ValueError:
                 return func(*args, **kwargs)
             try:
                 return func(*args, **kwargs)
             finally:
-                self.profiler.disable()
+                self.disable()
         if func.__name__ not in self.funcs:
             self.funcs.append(func.__name__)
         return run_func
 
     def printit(self, clear_info: bool = False) -> None:
-        if self.activate:
+        if self.enabled:
             sio = io.StringIO()
-            ps = pstats.Stats(self.profiler, stream=sio)
+            ps = pstats.Stats(self, stream=sio)
             ps.strip_dirs().sort_stats(pstats.SortKey.STDNAME).print_stats('|'.join(self.funcs))
             print(sio.getvalue())
             if clear_info:
-                self.profiler.clear()
+                self.clear()
 
 
-profiler = Profiler()
+profiler = CustomProfiler()

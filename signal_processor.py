@@ -1,4 +1,6 @@
+import copy
 import itertools
+import math
 
 import cv2
 import numpy as np
@@ -11,14 +13,50 @@ from custom_profiler import profiler
 from signal_data import Signal, SignalCollection
 
 
+class SignalManager:
+
+    # TODO: call this something else
+    #       its not a manager, just a bunch of collections
+    #       after renaming SignalCollection to SignalGroup
+    #           try SignalGroupCollection
+    #           or SignalData (but then rename signal_data.py)
+    #           also try SignalStore (preferred?)
+
+    # TODO: return copy of itself as result in run pipeline
+    #       after the above change
+
+    # TODO: make sure run pipeline uses inference runner results class
+
+    def __init__(self,
+                 num_signals: int = len(c.SELECTED_ROI_CONFIGS),
+                 roi_max_samples: int = c.ROI_MAX_SAMPLES,
+                 signal_max_samples: int = c.SIGNAL_MAX_SAMPLES,
+                 peak_max_samples: int = c.PEAK_MAX_SAMPLES) -> None:
+        self.sc_roi = SignalCollection(num_signals, y0=(np.nan,)*6, s_maxlen=roi_max_samples)
+        self.sc_raw = SignalCollection(num_signals, s_maxlen=signal_max_samples)
+        self.sc_proc = SignalCollection(num_signals)
+        self.sc_spec = SignalCollection(num_signals)
+        self.sc_corr = SignalCollection(math.comb(num_signals, 2))
+        self.sc_bpm = SignalCollection(num_signals, s_maxlen=peak_max_samples)
+        self.sc_ptt = SignalCollection(math.comb(num_signals, 2), s_maxlen=peak_max_samples)
+
+    def copy_signal_collections(self) -> tuple[SignalCollection, ...]:
+        return copy.deepcopy(vars(self).values())
+
+
 class SignalProcessor:
 
     def __init__(self,
-                 color_channel: c.SignalColorChannel = c.SIGNAL_COLOR_CHANNEL,
-                 processing_methods: list[c.SignalProcessingMethod] = c.SIGNAL_PROCESSING_METHODS,
-                 spectrum_transform: c.SignalSpectrumTransform = c.SIGNAL_SPECTRUM_TRANSFORM,
+                 num_signals: int = len(c.SELECTED_ROI_CONFIGS),
+                 roi_max_samples: int = c.ROI_MAX_SAMPLES,
+                 signal_max_samples: int = c.SIGNAL_MAX_SAMPLES,
+                 peak_max_samples: int = c.PEAK_MAX_SAMPLES,
                  *,
+                 color_channel: c.SignalColorChannel = c.SIGNAL_COLOR_CHANNEL,
+                 processing_methods: list[c.SignalProcessingMethod] | None = None,
+                 spectrum_transform: c.SignalSpectrumTransform = c.SIGNAL_SPECTRUM_TRANSFORM,
                  butter_order: int = c.FILTER_BUTTER_ORDER,
+                 butter_min_bw: float = c.FILTER_BUTTER_MIN_BW,
                  fir_taps: int = c.FILTER_FIR_TAPS,
                  fir_df: float = c.FILTER_FIR_DF,
                  min_freq: float = c.FILTER_MIN_FREQ,
@@ -29,10 +67,16 @@ class SignalProcessor:
                  max_lag: float = c.SIGNALS_MAX_LAG,
                  min_corr: float = c.SIGNALS_MIN_CORR,
                  max_corr: float = c.SIGNALS_MAX_CORR) -> None:
+        self.num_signals = num_signals
+        self.roi_max_samples = roi_max_samples
+        self.signal_max_samples = signal_max_samples
+        self.peak_max_samples = peak_max_samples
+        self.sm = SignalManager(self.num_signals, self.roi_max_samples, self.signal_max_samples, self.peak_max_samples)
         self.color_channel = color_channel
-        self.processing_methods = processing_methods
+        self.processing_methods = processing_methods if processing_methods is not None else c.SIGNAL_PROCESSING_METHODS
         self.spectrum_transform = spectrum_transform
         self.butter_order = butter_order
+        self.butter_min_bw = butter_min_bw
         self.fir_taps = fir_taps
         self.fir_df = fir_df
         self.min_freq = min_freq
@@ -47,8 +91,8 @@ class SignalProcessor:
     @profiler.timeit
     def make_filter(self, signal_processing_method, sampling_freq) -> np.ndarray:
         if signal_processing_method == c.SignalProcessingMethod.FILTER_BUTTER:
-            bands = [self.min_freq,
-                     self.max_freq]
+            bands = [min(self.min_freq, sampling_freq / 2 - 2 * self.butter_min_bw),
+                     min(self.max_freq, sampling_freq / 2 - self.butter_min_bw)]
             filt = scipy.signal.butter(self.butter_order, bands, btype='bandpass', output='sos', fs=sampling_freq)
         elif signal_processing_method == c.SignalProcessingMethod.FILTER_FIR:
             bands = [0,
@@ -158,7 +202,7 @@ class SignalProcessor:
                 raise NotImplementedError
         else:
             freqs, mags = [], []
-        signal_spectrum = Signal(freqs, mags, max_length=len(freqs))
+        signal_spectrum = Signal(freqs, mags, s_maxlen=len(freqs))
         signal_spectrum.set_range((self.min_freq, self.max_freq), (self.min_mag, self.max_mag))
         return signal_spectrum
 
@@ -180,10 +224,26 @@ class SignalProcessor:
             lags = (x_a[valid][-1] - x_a[valid][::-1])[np.abs(lag_indices)] * np.sign(lag_indices)
         else:
             lags, corr = [], []
-        signal_corr = Signal(lags, corr, max_length=len(lags))
+        signal_corr = Signal(lags, corr, s_maxlen=len(lags))
         signal_corr.set_range((self.min_lag, self.max_lag), (self.min_corr, self.max_corr))
         return signal_corr
 
     @profiler.timeit
     def correlate_signals(self, signals_proc: SignalCollection) -> SignalCollection:
         return SignalCollection(signals=[self.correlate_signal_pair(s_a, s_b) for s_a, s_b in itertools.combinations(signals_proc, 2)])
+
+    @profiler.timeit
+    def run_pipeline(self, frame: cv2.typing.MatLike, timestamp: float, rois: list[c.Location]) -> tuple[SignalCollection, ...]:
+        self.sm.sc_roi.add_samples(timestamp, rois)
+        rois = self.sm.sc_roi.get_means(as_int=True)
+        samples = self.sample_signals(frame, rois)
+        self.sm.sc_raw.add_samples(timestamp, samples)
+        self.sm.sc_proc = self.process_signals(self.sm.sc_raw)
+        self.sm.sc_spec = self.transform_signals(self.sm.sc_proc)
+        self.sm.sc_bpm.add_samples(timestamp, [f * 60 for f, _ in self.sm.sc_spec.get_peaks()])
+        self.sm.sc_corr = self.correlate_signals(self.sm.sc_proc)
+        self.sm.sc_ptt.add_samples(timestamp, [t * 1000 for t, _ in self.sm.sc_corr.get_peaks()])
+        return self.sm.copy_signal_collections()
+
+    def cleanup(self):
+        pass
