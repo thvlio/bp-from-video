@@ -1,5 +1,4 @@
 import collections.abc
-import dataclasses
 import typing
 
 import cv2
@@ -20,24 +19,27 @@ if typing.TYPE_CHECKING:
 
 type ModelProcessor = FaceDetector | FaceLandmarker | HandLandmarker | ImageSegmenter
 
+type Detections = list[tuple[tuple[int, int, int, int], np.ndarray[int]]]
+type Masks = tuple[np.ndarray[int], list[np.ndarray[float]]]
 
-@dataclasses.dataclass
+
 class ModelOutput:
 
-    model_type: model.ModelType
-    detections: list[tuple[tuple[int, int, int, int], np.ndarray[int]]] = dataclasses.field(default_factory=list)
-    masks: tuple[np.ndarray[int], list[np.ndarray[float]]] = dataclasses.field(default_factory=tuple)
+    def __init__(self, model_type: model.ModelType, detections: Detections | None = None, masks: Masks | None = None) -> None:
+        self.model_type = model_type
+        self.detections = detections if detections is not None else []
+        self.masks = masks if masks is not None else ()
 
 
-@dataclasses.dataclass
 class InferenceResults:
 
-    face_detector: ModelOutput
-    face_landmarker: ModelOutput
-    hand_landmarker: ModelOutput
-    person_segmenter: ModelOutput
+    def __init__(self, face_detector: ModelOutput, face_landmarker: ModelOutput, hand_landmarker: ModelOutput, person_segmenter: ModelOutput) -> None:
+        self.face_detector = face_detector
+        self.face_landmarker = face_landmarker
+        self.hand_landmarker = hand_landmarker
+        self.person_segmenter = person_segmenter
 
-    def __iter__(self) -> collections.abc.Iterable[ModelOutput]:
+    def __iter__(self) -> collections.abc.Iterator[ModelOutput]:
         return (v for v in self.__dict__.values())
 
 

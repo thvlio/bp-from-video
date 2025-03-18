@@ -1,5 +1,3 @@
-import dataclasses
-
 import numpy as np
 
 import model
@@ -7,12 +5,12 @@ import model
 type Location = tuple[int, int, int, int, int, int] | tuple[float, float, float, float, float, float] | np.ndarray[float]
 
 
-@dataclasses.dataclass
 class ROIConfig:
 
-    model_type: model.ModelType
-    landmark_indices: list[int]
-    relative_bbox: tuple[float, float, float, float]
+    def __init__(self, model_type: model.ModelType, landmark_indices: list[int], relative_bbox: tuple[float, float, float, float]) -> None:
+        self.model_type = model_type
+        self.landmark_indices = landmark_indices
+        self.relative_bbox = relative_bbox
 
 
 FACE_DETECTION_NOSE_INDEX = 2

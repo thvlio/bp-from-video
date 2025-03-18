@@ -83,7 +83,6 @@ class Drawer:
     @profiler.timeit
     def draw_inferences(self, frame: cv2.typing.MatLike, model_results: 'inference_runner.InferenceResults') -> cv2.typing.MatLike:
         drawn = frame.copy()
-        # result: 'inference_runner.ModelOutput' # TODO: check why its not detecting the type
         for result in model_results:
             if result.model_type in [model.ModelType.FACE_DETECTOR, model.ModelType.FACE_LANDMARKER, model.ModelType.HAND_LANDMARKER]:
                 if len(result.detections) > 0:
@@ -226,7 +225,7 @@ class Drawer:
                 data_g = np.vstack(list(group)).astype(int)
                 self.plot = cv2.polylines(self.plot, [data_g], False, color, lineType=self.line_type)
 
-    # TODO: add to config flags to plot each signal
+    # TODO: add flags to plot each signal group
 
     @profiler.timeit
     def plot_signals(self, signal_results: 'signal_processor.SignalStore') -> None:

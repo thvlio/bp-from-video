@@ -1,5 +1,4 @@
 import copy
-import dataclasses
 import enum
 import itertools
 import math
@@ -73,15 +72,9 @@ SIGNALS_MIN_CORR = -1.0
 SIGNALS_MAX_CORR = 1.0
 
 
-@dataclasses.dataclass
 class SignalStore:
 
-    num_signals: dataclasses.InitVar[int]
-    roi_max_samples: dataclasses.InitVar[int]
-    signal_max_samples: dataclasses.InitVar[int]
-    peak_max_samples: dataclasses.InitVar[int]
-
-    def __post_init__(self, num_signals, roi_max_samples, signal_max_samples, peak_max_samples):
+    def __init__(self, num_signals: int, roi_max_samples: int, signal_max_samples: int, peak_max_samples: int) -> None:
         self.sg_roi = signal_data.SignalGroup(num_signals, yi=(np.nan,)*6, s_maxlen=roi_max_samples)
         self.sg_raw = signal_data.SignalGroup(num_signals, s_maxlen=signal_max_samples)
         self.sg_proc = signal_data.SignalGroup(num_signals)

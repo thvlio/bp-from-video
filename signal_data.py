@@ -1,4 +1,5 @@
 import collections
+import collections.abc
 
 import numpy as np
 
@@ -8,7 +9,7 @@ type XType = int | float
 type YType = int | float | roi.Location
 
 
-class Signal: # TODO: dataclass?
+class Signal:
 
     def __init__(self,
                  xi: XType | list[XType] = np.nan,
@@ -84,10 +85,10 @@ class SignalGroup:
         self.range_y: tuple[YType, YType]
         self.reset_ranges()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'{self.__class__.__name__}({', '.join([f'{k}={v}' for k, v in vars(self).items()])})'
 
-    def __iter__(self):
+    def __iter__(self) -> collections.abc.Generator[Signal]:
         return (s for s in self.signals)
 
     def add_samples(self, xps: XType | list[XType], yps: list[YType]) -> None:

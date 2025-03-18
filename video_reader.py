@@ -1,4 +1,3 @@
-import dataclasses
 import time
 
 import cv2
@@ -8,14 +7,13 @@ import exceptions
 import profiler
 
 
-@dataclasses.dataclass
 class FrameData:
 
-    read: bool
-    frame: cv2.typing.MatLike
-    timestamp: float
-    sampling_freq: float
-    calibrating: bool
+    def __init__(self, frame: cv2.typing.MatLike, timestamp: float, sampling_freq: float, calibrating: bool) -> None:
+        self.frame = frame
+        self.timestamp = timestamp
+        self.sampling_freq = sampling_freq
+        self.calibrating = calibrating
 
 
 CAP_CALIBRATION_TIME = 5
@@ -110,7 +108,7 @@ class VideoReader:
             self.calibrating = False
         sampling_freq = 1 / (timestamp - self.timestamp_prev)
         self.timestamp_prev = timestamp
-        return FrameData(read, frame, timestamp, sampling_freq, self.calibrating)
+        return FrameData(frame, timestamp, sampling_freq, self.calibrating)
 
     run = read_frame
 
