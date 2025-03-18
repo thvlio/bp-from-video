@@ -1,16 +1,15 @@
 import cProfile
 import functools
 import io
+import os
 import pstats
 
-from config import Config as c
+PROFILER_ENABLED = True
 
 
-class CustomProfiler(cProfile.Profile):
+class Profiler(cProfile.Profile):
 
-    # TODO: change to Profiler and file to profiler.py
-
-    def __init__(self, enabled: bool = c.PROFILER_ENABLED):
+    def __init__(self, enabled: bool = PROFILER_ENABLED):
         self.enabled = enabled
         self.funcs = []
         super().__init__(subcalls=False, builtins=False)
@@ -39,7 +38,10 @@ class CustomProfiler(cProfile.Profile):
             ps.strip_dirs().sort_stats(pstats.SortKey.STDNAME).print_stats('|'.join(self.funcs))
             print(sio.getvalue())
             if clear_info:
+                os.system('clear')
                 self.clear()
 
 
-profiler = CustomProfiler()
+profiler = Profiler()
+timeit = profiler.timeit
+printit = profiler.printit
