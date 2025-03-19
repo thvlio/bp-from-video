@@ -59,3 +59,8 @@ Primeiro, ajuste os parâmetros dentro dos scripts, se necessário. Depois, exec
 ```
 python bp.py
 ```
+
+Para a versão que usa multiprocessing, execute:
+```
+python pbp.py
+```

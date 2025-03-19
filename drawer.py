@@ -225,12 +225,10 @@ class Drawer:
                 data_g = np.vstack(list(group)).astype(int)
                 self.plot = cv2.polylines(self.plot, [data_g], False, color, lineType=self.line_type)
 
-    # TODO: add flags to plot each signal group
-
     @profiler.timeit
     def plot_signals(self, signal_results: 'signal_processor.SignalStore') -> None:
         self.plot = np.full_like(self.plot, 255)
-        signal_groups = [signal_results.sg_proc, signal_results.sg_spec, signal_results.sg_corr] # TODO: dont hard code it here
+        signal_groups = [signal_results.sg_proc, signal_results.sg_spec, signal_results.sg_corr]
         for signal_group, graph_origin in zip(signal_groups, self.graph_origins):
             graph_range_x = signal_group.range_x if np.isfinite(signal_group.range_x).all() else self.graph_default_range
             graph_range_y = signal_group.range_y if np.isfinite(signal_group.range_y).all() else self.graph_default_range
